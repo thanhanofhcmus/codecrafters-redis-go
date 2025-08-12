@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -22,10 +23,12 @@ const (
 	SymDouble    Sym = ','
 	SymBigNumber Sym = '('
 
+	// Aggregate like
+	SymBulkString Sym = '$'
+	SymBulkError  Sym = '!'
+
 	// Aggregate
-	SymBulkString     Sym = '$'
 	SymArray          Sym = '*'
-	SymBulkError      Sym = '!'
 	SymVerbatimString Sym = '='
 	SymMap            Sym = '%'
 	SymAttribute      Sym = '|'
@@ -71,8 +74,44 @@ type Cmd struct {
 	// TODO: VerbatimStrings, Pushes, BigNumber
 }
 
+const CR byte = '\r'
+const LF byte = '\n'
+
+var CRLF []byte = []byte("\r\n")
+
+func (cmd Cmd) toRESPBytes() ([]byte, error) {
+	var buffer bytes.Buffer
+
+	err := buffer.WriteByte(byte(cmd.Sym))
+	if err != nil {
+		return nil, err
+	}
+
+	switch cmd.Sym {
+	case SymNull:
+		// Do nothing
+	case SymString:
+		if _, err = buffer.WriteString(cmd.String); err != nil {
+			return nil, err
+		}
+	case SymError:
+		if _, err = buffer.WriteString(cmd.Error); err != nil {
+			return nil, err
+		}
+	default:
+		panic(fmt.Sprintf("unknown symbol type %c", cmd.Sym))
+	}
+
+	_, err = buffer.Write(CRLF)
+	if err != nil {
+		return nil, err
+	}
+
+	return buffer.Bytes(), nil
+}
+
 func readUntilCRLF(bufReader *bufio.Reader) ([]byte, error) {
-	data, err := bufReader.ReadBytes('\r')
+	data, err := bufReader.ReadBytes(CR)
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +119,7 @@ func readUntilCRLF(bufReader *bufio.Reader) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if lastByte != '\n' {
+	if lastByte != LF {
 		return nil, fmt.Errorf("expected ending byte to be LF, got `%c`", lastByte)
 	}
 	return data[:len(data)-1], nil
@@ -188,6 +227,9 @@ func parseElement(bufReader *bufio.Reader) (Cmd, error) {
 		cmd.BulkError = data
 	case SymArray:
 		cmd, err = parseSymArray(bufReader)
+		if err != nil {
+			return Cmd{}, err
+		}
 	default:
 		return Cmd{}, fmt.Errorf("symbol type `%c` is currently not supported", sym)
 	}
@@ -203,6 +245,15 @@ func readAndParseCommand(bufReader *bufio.Reader) (Cmd, error) {
 	return cmd, err
 }
 
+func handleCmd(cmd Cmd) (Cmd, error) {
+	_ = cmd
+
+	var result Cmd
+	result.Sym = SymString
+	result.String = "PONG"
+	return result, nil
+}
+
 func handleConn(conn net.Conn) {
 	bufReader := bufio.NewReader(conn)
 	for {
@@ -215,19 +266,29 @@ func handleConn(conn net.Conn) {
 			}
 		}()
 
-		var cmd Cmd
+		var res Cmd
 
-		cmd, err = readAndParseCommand(bufReader)
+		res, err = readAndParseCommand(bufReader)
 		if err != nil {
 			log.Println("Failed to read and parse data:", err)
 			return
 		}
 
-		fmt.Printf("COMMAND IS : %+v\n", cmd)
+		fmt.Printf("COMMAND IS : %+v\n", res)
 
-		_, err = conn.Write([]byte("+PONG\r\n"))
+		resp, err := handleCmd(res)
 		if err != nil {
-			log.Println("Failed to PONG", err)
+			return
+		}
+
+		respByte, err := resp.toRESPBytes()
+		if err != nil {
+			return
+		}
+
+		_, err = conn.Write(respByte)
+		if err != nil {
+			log.Println("Failed to response", err)
 			return
 		}
 	}
