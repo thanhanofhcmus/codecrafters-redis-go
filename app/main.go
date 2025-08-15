@@ -79,12 +79,10 @@ const LF byte = '\n'
 
 var CRLF []byte = []byte("\r\n")
 
-func (cmd Cmd) toRESPBytes() ([]byte, error) {
-	var buffer bytes.Buffer
-
+func (cmd Cmd) buildRESPBytes(buffer *bytes.Buffer) error {
 	err := buffer.WriteByte(byte(cmd.Sym))
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	switch cmd.Sym {
@@ -92,11 +90,33 @@ func (cmd Cmd) toRESPBytes() ([]byte, error) {
 		// Do nothing
 	case SymString:
 		if _, err = buffer.WriteString(cmd.String); err != nil {
-			return nil, err
+			return err
 		}
 	case SymError:
 		if _, err = buffer.WriteString(cmd.Error); err != nil {
-			return nil, err
+			return err
+		}
+	case SymBulkString:
+		if _, err = fmt.Fprint(buffer, len(cmd.BulkString)); err != nil {
+			return err
+		}
+		if _, err = buffer.Write(CRLF); err != nil {
+			return err
+		}
+		if _, err = buffer.WriteString(cmd.BulkString); err != nil {
+			return err
+		}
+	case SymArray:
+		if _, err = fmt.Fprint(buffer, len(cmd.Array)); err != nil {
+			return err
+		}
+		if _, err = buffer.Write(CRLF); err != nil {
+			return err
+		}
+		for _, elem := range cmd.Array {
+			if err = elem.buildRESPBytes(buffer); err != nil {
+				return err
+			}
 		}
 	default:
 		panic(fmt.Sprintf("unknown symbol type %c", cmd.Sym))
@@ -104,10 +124,16 @@ func (cmd Cmd) toRESPBytes() ([]byte, error) {
 
 	_, err = buffer.Write(CRLF)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	return buffer.Bytes(), nil
+	return nil
+}
+
+func (cmd Cmd) ToRESPBytes() ([]byte, error) {
+	var buffer bytes.Buffer
+	err := cmd.buildRESPBytes(&buffer)
+	return buffer.Bytes(), err
 }
 
 func readUntilCRLF(bufReader *bufio.Reader) ([]byte, error) {
@@ -145,6 +171,7 @@ func parseSymArray(bufReader *bufio.Reader) (Cmd, error) {
 	}
 
 	var cmd Cmd
+	cmd.Sym = SymArray
 	cmd.Array = make([]Cmd, 0, size)
 
 	for i := range size {
@@ -246,11 +273,33 @@ func readAndParseCommand(bufReader *bufio.Reader) (Cmd, error) {
 }
 
 func handleCmd(cmd Cmd) (Cmd, error) {
-	_ = cmd
+	if cmd.Sym != SymArray {
+		return Cmd{}, fmt.Errorf("cannot handle command that is not of array type")
+	}
+	args := cmd.Array
+	if len(args) == 0 {
+		return Cmd{}, fmt.Errorf("command cannot have zero size")
+	}
+	fArg := args[0]
+	if fArg.Sym != SymBulkString {
+		return Cmd{}, fmt.Errorf("first argument is not a BulkString")
+	}
 
 	var result Cmd
-	result.Sym = SymString
-	result.String = "PONG"
+
+	switch fArg.BulkString {
+	case "PING":
+		result.Sym = SymString
+		result.String = "PONG"
+	case "ECHO":
+		result.Sym = SymBulkString
+		if len(args) >= 2 {
+			result.BulkString = args[1].BulkString
+		}
+	default:
+		return Cmd{}, fmt.Errorf("unknown command `%s`", fArg.BulkString)
+	}
+
 	return result, nil
 }
 
@@ -274,14 +323,12 @@ func handleConn(conn net.Conn) {
 			return
 		}
 
-		fmt.Printf("COMMAND IS : %+v\n", res)
-
 		resp, err := handleCmd(res)
 		if err != nil {
 			return
 		}
 
-		respByte, err := resp.toRESPBytes()
+		respByte, err := resp.ToRESPBytes()
 		if err != nil {
 			return
 		}
