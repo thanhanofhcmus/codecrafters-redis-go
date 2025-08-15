@@ -36,6 +36,26 @@ func (app *App) HandleCommand(cmd Cmd) (Cmd, error) {
 		if len(args) >= 2 {
 			result.BulkString = args[1].BulkString
 		}
+	case "SET":
+		if len(args) < 3 {
+			return Cmd{}, fmt.Errorf("invalid number of arguments")
+		}
+		// TODO: handle type is not bulk string
+		key, value := args[1], args[2]
+		app.m[key.BulkString] = value.BulkString
+		result.Sym = SymString
+		result.String = "OK"
+	case "GET":
+		if len(args) != 2 {
+			return Cmd{}, fmt.Errorf("invalid number of arguments")
+		}
+		// TODO: handle type is not bulk string
+		if value, exists := app.m[args[1].BulkString]; exists {
+			result.Sym = SymBulkString
+			result.BulkString = value
+		} else {
+			result.Sym = SymNull
+		}
 	default:
 		return Cmd{}, fmt.Errorf("unknown command `%s`", fArg.BulkString)
 	}
