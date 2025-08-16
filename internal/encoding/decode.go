@@ -10,12 +10,7 @@ import (
 )
 
 func UnmarshalCommand(bufReader *bufio.Reader) (types.Command, error) {
-	// TODO: move error to other step
-	cmd, err := parseElement(bufReader)
-	if err != nil {
-		return types.Command{}, newUnmarshalError(cmd, "unmarshal", err)
-	}
-	return cmd, nil
+	return parseElement(bufReader)
 }
 
 func readUntilCRLF(bufReader *bufio.Reader) ([]byte, error) {
@@ -82,65 +77,69 @@ func readLengthAndStringUntilCRLF(bufReader *bufio.Reader) (string, error) {
 		return "", err
 	}
 	if len(crlf) != 0 {
-		return "", fmt.Errorf("found more data at the end of bulk string")
+		return "", fmt.Errorf("found more data after reading string")
 	}
 	return string(buffer), nil
 }
 
 func parseElement(bufReader *bufio.Reader) (types.Command, error) {
+	var cmd types.Command
+
+	newErr := func(step string, inner error) *EncodingError {
+		return newUnmarshalError(cmd, step, inner)
+	}
+
 	symByte, err := bufReader.ReadByte()
 	if err != nil {
-		return types.Command{}, fmt.Errorf("failed to read symbol byte: %w", err)
+		return cmd, newErr("parse symbol byte", err)
 	}
 
 	sym := types.Sym(symByte)
-	if !types.IsSymbolValid(sym) {
-		return types.Command{}, fmt.Errorf("unknown symbol byte `%c`", symByte)
-	}
-
-	var cmd types.Command
 	cmd.Sym = sym
+	if !types.IsSymbolValid(sym) {
+		return cmd, newErr("check valid symbol type", nil)
+	}
 
 	switch sym {
 	case types.SymNull:
 		data, err := readUntilCRLF(bufReader)
 		if err != nil {
-			return types.Command{}, fmt.Errorf("read simple string value failed: %w", err)
+			return cmd, newErr("read null CRLF", err)
 		}
 		if len(data) != 0 {
-			return types.Command{}, fmt.Errorf("null cannot have other data")
+			return cmd, newErr("check null spare data", nil)
 		}
 	case types.SymString:
 		data, err := readUntilCRLF(bufReader)
 		if err != nil {
-			return types.Command{}, fmt.Errorf("read simple string value failed: %w", err)
+			return cmd, newErr("read simple string data", err)
 		}
 		cmd.String = string(data)
 	case types.SymError:
 		data, err := readUntilCRLF(bufReader)
 		if err != nil {
-			return types.Command{}, fmt.Errorf("read simple error value failed: %w", err)
+			return cmd, newErr("read simple error data", err)
 		}
 		cmd.Error = string(data)
 	case types.SymBulkString:
 		data, err := readLengthAndStringUntilCRLF(bufReader)
 		if err != nil {
-			return types.Command{}, fmt.Errorf("read bulk string value failed: %w", err)
+			return cmd, newErr("read bulk string data", err)
 		}
 		cmd.BulkString = data
 	case types.SymBulkError:
 		data, err := readLengthAndStringUntilCRLF(bufReader)
 		if err != nil {
-			return types.Command{}, fmt.Errorf("read bulk string value failed: %w", err)
+			return cmd, newErr("read bulk error data", err)
 		}
 		cmd.BulkError = data
 	case types.SymArray:
 		cmd, err = parseSymArray(bufReader)
 		if err != nil {
-			return types.Command{}, err
+			return cmd, err
 		}
 	default:
-		return types.Command{}, fmt.Errorf("symbol type `%c` is currently not supported", sym)
+		return cmd, newErr("match symbol", fmt.Errorf("symbol type `%c` is currently not supported", sym))
 	}
 
 	return cmd, nil

@@ -16,7 +16,7 @@ func MarshalCommand(cmd types.Command) ([]byte, error) {
 	return buffer.Bytes(), nil
 }
 
-func buildRESPBytes(cmd types.Command, buffer *bytes.Buffer) *EncodingError {
+func buildRESPBytes(cmd types.Command, buffer *bytes.Buffer) error {
 	newErr := func(step string, inner error) *EncodingError {
 		return newMarshalError(cmd, step, inner)
 	}
@@ -73,7 +73,6 @@ func buildRESPBytes(cmd types.Command, buffer *bytes.Buffer) *EncodingError {
 			return newErr("write length CRLF", err)
 		}
 		for _, elem := range cmd.Array {
-			// TODO: fix this
 			if err = buildRESPBytes(elem, buffer); err != nil {
 				return newErr("write element", err)
 			}
