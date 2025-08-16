@@ -8,11 +8,12 @@ import (
 	"log"
 	"net"
 
+	"github.com/codecrafters-io/redis-starter-go/internal/app"
 	"github.com/codecrafters-io/redis-starter-go/internal/encoding"
 	"github.com/codecrafters-io/redis-starter-go/pkg/types"
 )
 
-func handleConn(app *App, conn net.Conn) {
+func handleConn(app *app.App, conn net.Conn) {
 	bufReader := bufio.NewReader(conn)
 	for {
 		var err error
@@ -55,7 +56,7 @@ func handleConn(app *App, conn net.Conn) {
 }
 
 func main() {
-	app := NewApp()
+	app := app.NewApp()
 	l, err := net.Listen("tcp", "0.0.0.0:6379")
 	if err != nil {
 		log.Fatalln("Failed to bind", err)
