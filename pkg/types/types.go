@@ -76,3 +76,30 @@ type Command struct {
 
 	// TODO: VerbatimStrings, Pushes, BigNumber
 }
+
+func NewNullCommand() Command {
+	return Command{
+		Sym: SymNull,
+	}
+}
+
+func NewStringCommand(value string) Command {
+	return Command{
+		Sym:    SymString,
+		String: value,
+	}
+}
+
+func NewBulkStringCommand(value string) Command {
+	return Command{
+		Sym:        SymBulkString,
+		BulkString: value,
+	}
+}
+
+func NewErrorCommand(value string) Command {
+	return Command{
+		Sym:   SymError,
+		Error: value,
+	}
+}
