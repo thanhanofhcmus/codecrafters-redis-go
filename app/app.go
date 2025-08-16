@@ -19,7 +19,7 @@ func convertArgsCmdToString(cmd Command) ([]string, error) {
 		if arg.Sym != SymBulkString {
 			return nil, fmt.Errorf("expect argument to be of the type BulkString, got %c", arg.Sym)
 		}
-		if len(arg.BulkString) != 0 {
+		if len(arg.BulkString) == 0 {
 			return nil, fmt.Errorf("argument is empty")
 		}
 		result = append(result, arg.BulkString)
@@ -61,7 +61,6 @@ func (app *App) HandleCommand(cmd Command) (Command, error) {
 		if len(args) != 2 {
 			return Command{}, fmt.Errorf("invalid number of arguments")
 		}
-		// TODO: handle type is not bulk string
 		if value, exists := app.m[args[1]]; exists {
 			result.Sym = SymBulkString
 			result.BulkString = value
