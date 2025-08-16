@@ -2,9 +2,14 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
+
+	"github.com/codecrafters-io/redis-starter-go/internal/encoding"
+	"github.com/codecrafters-io/redis-starter-go/pkg/types"
 )
 
 func handleConn(app *App, conn net.Conn) {
@@ -19,11 +24,15 @@ func handleConn(app *App, conn net.Conn) {
 			}
 		}()
 
-		var res Command
+		var res types.Command
 
-		res, err = readAndParseCommand(bufReader)
+		res, err = encoding.UnmarshalCommand(bufReader)
 		if err != nil {
-			log.Println("Failed to read and parse data:", err)
+			if errors.Is(err, io.EOF) {
+				err = nil
+			} else {
+				log.Println("Failed to unmarshal data:", err)
+			}
 			return
 		}
 
@@ -32,7 +41,7 @@ func handleConn(app *App, conn net.Conn) {
 			return
 		}
 
-		respByte, err := resp.ToRESPBytes()
+		respByte, err := encoding.MarshalCommand(resp)
 		if err != nil {
 			return
 		}
