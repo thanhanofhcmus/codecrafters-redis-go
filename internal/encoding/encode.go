@@ -21,14 +21,32 @@ func buildRESPBytes(cmd types.Command, buffer *bytes.Buffer) *EncodingError {
 		return newMarshalError(cmd, step, inner)
 	}
 
-	err := buffer.WriteByte(byte(cmd.Sym))
+	var err error
+
+	// Trick to handle Null on RESP2
+	if cmd.Sym == types.SymNull {
+		err = buffer.WriteByte(byte(types.SymBulkString))
+		if err != nil {
+			return newErr("write symbol", err)
+		}
+		if _, err = fmt.Fprint(buffer, -1); err != nil {
+			return newErr("write length", err)
+		}
+		if _, err = buffer.Write(CRLF); err != nil {
+			return newErr("write length CRLF", err)
+		}
+		return nil
+	}
+
+	err = buffer.WriteByte(byte(cmd.Sym))
 	if err != nil {
 		return newErr("write symbol", err)
 	}
 
 	switch cmd.Sym {
 	case types.SymNull:
-		// Do nothing
+		// RESP3: Do nothing
+
 	case types.SymString:
 		if _, err = buffer.WriteString(cmd.String); err != nil {
 			return newErr("write string", err)
