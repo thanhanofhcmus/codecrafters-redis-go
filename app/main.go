@@ -19,7 +19,7 @@ func handleConn(app *App, conn net.Conn) {
 			}
 		}()
 
-		var res Cmd
+		var res Command
 
 		res, err = readAndParseCommand(bufReader)
 		if err != nil {

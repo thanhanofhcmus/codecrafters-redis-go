@@ -6,7 +6,7 @@ type App struct {
 	m map[string]string
 }
 
-func convertArgsCmdToString(cmd Cmd) ([]string, error) {
+func convertArgsCmdToString(cmd Command) ([]string, error) {
 	if cmd.Sym != SymArray {
 		return nil, fmt.Errorf("expect command type to be Array, got %c", cmd.Sym)
 	}
@@ -33,13 +33,13 @@ func NewApp() *App {
 	}
 }
 
-func (app *App) HandleCommand(cmd Cmd) (Cmd, error) {
+func (app *App) HandleCommand(cmd Command) (Command, error) {
 	args, err := convertArgsCmdToString(cmd)
 	if err != nil {
-		return Cmd{}, err
+		return Command{}, err
 	}
 
-	var result Cmd
+	var result Command
 
 	switch args[0] {
 	case "PING":
@@ -52,14 +52,14 @@ func (app *App) HandleCommand(cmd Cmd) (Cmd, error) {
 		}
 	case "SET":
 		if len(args) < 3 {
-			return Cmd{}, fmt.Errorf("invalid number of arguments")
+			return Command{}, fmt.Errorf("invalid number of arguments")
 		}
 		app.m[args[1]] = args[2]
 		result.Sym = SymString
 		result.String = "OK"
 	case "GET":
 		if len(args) != 2 {
-			return Cmd{}, fmt.Errorf("invalid number of arguments")
+			return Command{}, fmt.Errorf("invalid number of arguments")
 		}
 		// TODO: handle type is not bulk string
 		if value, exists := app.m[args[1]]; exists {
@@ -69,7 +69,7 @@ func (app *App) HandleCommand(cmd Cmd) (Cmd, error) {
 			result.Sym = SymNull
 		}
 	default:
-		return Cmd{}, fmt.Errorf("unknown command `%s`", args[0])
+		return Command{}, fmt.Errorf("unknown command `%s`", args[0])
 	}
 
 	return result, nil

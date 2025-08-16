@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-type Cmd struct {
+type Command struct {
 	Sym Sym
 
 	Integer    int64
@@ -16,16 +16,16 @@ type Cmd struct {
 	BulkString string
 	BulkError  string
 
-	Array []Cmd
+	Array []Command
 
-	Map       map[*Cmd]Cmd
-	Attribute map[*Cmd]Cmd
-	Set       map[*Cmd]bool
+	Map       map[*Command]Command
+	Attribute map[*Command]Command
+	Set       map[*Command]bool
 
 	// TODO: VerbatimStrings, Pushes, BigNumber
 }
 
-func (cmd Cmd) buildRESPBytes(buffer *bytes.Buffer) error {
+func (cmd Command) buildRESPBytes(buffer *bytes.Buffer) error {
 	err := buffer.WriteByte(byte(cmd.Sym))
 	if err != nil {
 		return err
@@ -76,7 +76,7 @@ func (cmd Cmd) buildRESPBytes(buffer *bytes.Buffer) error {
 	return nil
 }
 
-func (cmd Cmd) ToRESPBytes() ([]byte, error) {
+func (cmd Command) ToRESPBytes() ([]byte, error) {
 	var buffer bytes.Buffer
 	err := cmd.buildRESPBytes(&buffer)
 	return buffer.Bytes(), err
