@@ -51,18 +51,13 @@ func (app *App) HandleCommand(cmd types.RawCmd) (result types.RawCmd, err error)
 	}
 
 	command := args[0]
-
 	switch strings.ToUpper(command) {
 	case "PING":
-		result = types.NewStringRawCmd("PONG")
+		result, err = app.handlePING(args)
 	case "ECHO":
-		if len(args) < 2 {
-			err = NewExpectArgumentError("ECHO")
-			break
-		}
-		result = types.NewBulkStringRawCmd(args[1])
+		result, err = app.handleECHO(args)
 	case "SET":
-		result, err = app.handleSET(args, cmd)
+		result, err = app.handleSET(args)
 	case "GET":
 		result, err = app.handleGET(args, cmd)
 	default:
@@ -76,7 +71,23 @@ func (app *App) HandleCommand(cmd types.RawCmd) (result types.RawCmd, err error)
 	return
 }
 
-func (app *App) handleSET(args []string, _ types.RawCmd) (types.RawCmd, error) {
+func (app *App) handlePING(args []string) (types.RawCmd, error) {
+	c, err := argsparser.Parse[cmd.PING](args)
+	if err != nil {
+		return types.RawCmd{}, err
+	}
+	return types.NewStringRawCmd(c.Message), nil
+}
+
+func (app *App) handleECHO(args []string) (types.RawCmd, error) {
+	c, err := argsparser.Parse[cmd.ECHO](args)
+	if err != nil {
+		return types.RawCmd{}, err
+	}
+	return types.NewStringRawCmd(c.Message), nil
+}
+
+func (app *App) handleSET(args []string) (types.RawCmd, error) {
 	c, err := argsparser.Parse[cmd.SET](args)
 	if err != nil {
 		return types.RawCmd{}, err

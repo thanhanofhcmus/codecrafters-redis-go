@@ -80,9 +80,10 @@ type optionOrEnumMember struct {
 }
 
 type structMetadata struct {
-	positions []positionMetadata
-	options   []optionMetadatada
-	enums     []enumMetadata
+	positions                []positionMetadata
+	requiredPositionArgsSize int
+	options                  []optionMetadatada
+	enums                    []enumMetadata
 
 	argKeys map[string]optionOrEnumMember
 }
@@ -107,17 +108,36 @@ func Parse[T any](args []string) (T, error) {
 	value = value.Elem()
 	idx := 1
 
-	// handle position arguments
-	posArgLen := len(smd.positions)
-	if idx+posArgLen > length {
+	posIdx := 0
+	posLength := len(smd.positions)
+	// handle required position arguments
+	if idx+smd.requiredPositionArgsSize > length {
 		return result, fmt.Errorf("not enough arguments")
 	}
-	for i := range posArgLen {
-		if err := setFieldValue(value, smd.positions[i].fieldName, args[idx+i]); err != nil {
-			return result, fmt.Errorf("set position argument %d failed: %w", i+1, err)
+
+	for idx < length && posIdx < posLength {
+		if err := setFieldValue(value, smd.positions[posIdx].fieldName, args[idx]); err != nil {
+			return result, fmt.Errorf("set required position argument %d failed: %w", posIdx, err)
 		}
 	}
-	idx += posArgLen
+
+	// handle optional position arguments
+	for idx < length && posIdx < posLength {
+		if err := setFieldValue(value, smd.positions[posIdx].fieldName, args[idx]); err != nil {
+			return result, fmt.Errorf("set optional position argument %d failed: %w", posIdx, err)
+		}
+		idx += 1
+		posIdx += 1
+	}
+
+	for posIdx < posLength {
+		if err := setFieldValue(value, smd.positions[posIdx].fieldName, smd.positions[posIdx].attribute.rawDefault); err != nil {
+			return result, fmt.Errorf("set default value for optional position argument %d failed: %w", posIdx, err)
+		}
+		posIdx += 1
+	}
+
+	// fill in default value for unset optional pos
 
 	// handle the mix of options and enums
 	doneFields := map[string]bool{}
@@ -148,37 +168,50 @@ func Parse[T any](args []string) (T, error) {
 
 func processOptionsAndEnums(args []string, key string, md optionOrEnumMember, value reflect.Value, idx *int) error {
 	if md.option != nil {
-		raw := ""
-		if md.option.kind != reflect.Bool {
-			if len(args) == *idx {
-				return fmt.Errorf("no value provided")
-			}
-			raw = args[*idx]
-			*idx += 1
-		}
-		if err := setFieldValue(value, md.option.fieldName, raw); err != nil {
-			return err
-		}
+		return processOption(args, *md.option, value, idx)
 	} else if md.enumMember != nil {
-		raw := ""
-		if md.enumMember.kind != reflect.Bool {
-			if len(args) == *idx {
-				return fmt.Errorf("no value provided")
-			}
-			raw = args[*idx]
-			*idx += 1
-		}
-		parent := md.enumMember.parent
-		if err := setEnumMemberValue(value, parent.fieldName, md.enumMember.fieldName, raw); err != nil {
-			return err
-		}
-		if parent.storeKeyFieldName != "" {
-			if err := setEnumMemberValue(value, parent.fieldName, parent.storeKeyFieldName, key); err != nil {
-				return err
-			}
-		}
+		return processEnumMember(args, key, *md.enumMember, value, idx)
 	} else {
 		return fmt.Errorf("not an option or enum argument")
+	}
+}
+
+func processOption(args []string, omd optionMetadatada, value reflect.Value, idx *int) error {
+	raw := ""
+	if omd.kind != reflect.Bool {
+		if len(args) == *idx {
+			if !omd.attribute.isOptional {
+				return fmt.Errorf("no value provided")
+			}
+			raw = omd.attribute.rawDefault
+		} else {
+			raw = args[*idx]
+			*idx += 1
+		}
+	}
+	if err := setFieldValue(value, omd.fieldName, raw); err != nil {
+		return err
+	}
+	return nil
+}
+
+func processEnumMember(args []string, key string, md enumMemberMetadata, value reflect.Value, idx *int) error {
+	raw := ""
+	if md.kind != reflect.Bool {
+		if len(args) == *idx {
+			return fmt.Errorf("no value provided")
+		}
+		raw = args[*idx]
+		*idx += 1
+	}
+	parent := md.parent
+	if err := setEnumMemberValue(value, parent.fieldName, md.fieldName, raw); err != nil {
+		return err
+	}
+	if parent.storeKeyFieldName != "" {
+		if err := setEnumMemberValue(value, parent.fieldName, parent.storeKeyFieldName, key); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -272,6 +305,7 @@ func extractTag[T any]() (structMetadata, error) {
 	}
 
 	// TODO: validate attributes
+	// tag optional should only be at the last of of pos
 
 	argKeys := map[string]optionOrEnumMember{}
 	for _, omd := range result.options {
@@ -293,6 +327,7 @@ func extractTag[T any]() (structMetadata, error) {
 
 	seenPos := map[int]bool{}
 	maxPos := -1
+	requiredCount := 0
 	slices.SortFunc(result.positions, func(a positionMetadata, b positionMetadata) int {
 		return a.position - b.position
 	})
@@ -300,12 +335,16 @@ func extractTag[T any]() (structMetadata, error) {
 		if seenPos[pmd.position] {
 			return structMetadata{}, fmt.Errorf("position %d appears more than one time", pmd.position)
 		}
-		maxPos = max(maxPos, pmd.position)
 		seenPos[pmd.position] = true
+		maxPos = max(maxPos, pmd.position)
+		if !pmd.attribute.isOptional {
+			requiredCount += 1
+		}
 	}
 	if maxPos != len(seenPos) {
 		return structMetadata{}, fmt.Errorf("max position %d is not them same as the number of position arguments %d", maxPos, len(seenPos))
 	}
+	result.requiredPositionArgsSize = requiredCount
 
 	return result, nil
 }
@@ -383,11 +422,13 @@ func parseTag(tag string) (fieldType fieldType, fieldSnd string, attribute attri
 		// TODO: strict validation, only allow splits of 2
 	}
 	for _, attrRaw := range attrParts[1:] {
-		parts := strings.Split(attrRaw, ",")
+		parts := strings.Split(attrRaw, ":")
 		switch parts[0] {
 		case "default":
-			// TODO:
-			panic("default attribute not handled")
+			if len(parts) != 2 {
+				panic("wrong default attribute format")
+			}
+			attribute.rawDefault = parts[1]
 		case "name":
 			// TODO:
 			panic("name attribute not handled")
