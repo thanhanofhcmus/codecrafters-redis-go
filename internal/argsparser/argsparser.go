@@ -161,6 +161,7 @@ func processOptionsAndEnums(args []string, md optionOrEnumMember, value reflect.
 		}
 	} else if md.enumMember != nil {
 		raw := ""
+		key := args[*idx-1]
 		if md.enumMember.kind != reflect.Bool {
 			if len(args) == *idx {
 				return fmt.Errorf("no value provided")
@@ -168,8 +169,14 @@ func processOptionsAndEnums(args []string, md optionOrEnumMember, value reflect.
 			raw = args[*idx]
 			*idx += 1
 		}
-		if err := setEnumMemberValue(value, *md.enumMember, raw); err != nil {
+		parent := md.enumMember.parent
+		if err := setEnumMemberValue(value, parent.fieldName, md.enumMember.fieldName, raw); err != nil {
 			return err
+		}
+		if parent.storeKeyFieldName != "" {
+			if err := setEnumMemberValue(value, parent.fieldName, parent.storeKeyFieldName, key); err != nil {
+				return err
+			}
 		}
 	} else {
 		return fmt.Errorf("not an option or enum argument")
@@ -234,11 +241,8 @@ func setFieldValue(value reflect.Value, fieldName string, raw string) error {
 	return nil
 }
 
-func setEnumMemberValue(value reflect.Value, emmd enumMemberMetadata, raw string) error {
+func setEnumMemberValue(value reflect.Value, parentFieldName, fieldName, raw string) error {
 	// TODO: handle error
-	parentFieldName := emmd.parent.fieldName
-	fieldName := emmd.fieldName
-
 	fieldValue := value.FieldByName(parentFieldName).FieldByName(fieldName)
 	if err := setSimpleValue(fieldValue, raw); err != nil {
 		return fmt.Errorf("set value for option enum %s.%s: %w", parentFieldName, fieldName, err)
@@ -369,7 +373,7 @@ func parseTag(tag string) (fieldType fieldType, fieldSnd string, attribute attri
 	if len(attrParts) == 0 {
 		return fieldTypeAuto, "", attribute, nil
 	}
-	firstParts := strings.Split(attrParts[0], ",")
+	firstParts := strings.Split(attrParts[0], ":")
 	if len(firstParts) > 0 {
 		if firstParts[0] != "" {
 			fieldType = firstParts[0]
