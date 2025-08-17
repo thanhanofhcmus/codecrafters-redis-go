@@ -25,7 +25,7 @@ func handleConn(app *app.App, conn net.Conn) {
 			}
 		}()
 
-		var res types.Command
+		var res types.RawCmd
 
 		res, err = encoding.UnmarshalCommand(bufReader)
 		if err != nil {

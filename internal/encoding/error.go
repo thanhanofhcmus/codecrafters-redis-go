@@ -8,7 +8,7 @@ import (
 )
 
 type EncodingError struct {
-	cmd           types.Command
+	cmd           types.RawCmd
 	encondingType string // Marshal | Unmarshal
 	step          string
 	inner         error
@@ -22,7 +22,7 @@ func (err *EncodingError) Is(target error) bool {
 	return errors.Is(err.inner, target)
 }
 
-func newMarshalError(cmd types.Command, step string, inner error) *EncodingError {
+func newMarshalError(cmd types.RawCmd, step string, inner error) *EncodingError {
 	return &EncodingError{
 		cmd:           cmd,
 		encondingType: "Marshal",
@@ -31,7 +31,7 @@ func newMarshalError(cmd types.Command, step string, inner error) *EncodingError
 	}
 }
 
-func newUnmarshalError(cmd types.Command, step string, inner error) *EncodingError {
+func newUnmarshalError(cmd types.RawCmd, step string, inner error) *EncodingError {
 	return &EncodingError{
 		cmd:           cmd,
 		encondingType: "Unmarshal",

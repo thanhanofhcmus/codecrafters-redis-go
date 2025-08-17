@@ -57,7 +57,7 @@ func GetSymString(sym Sym) string {
 	return fmt.Sprintf("<unknown|%b>", sym)
 }
 
-type Command struct {
+type RawCmd struct {
 	Sym Sym
 
 	Integer    int64
@@ -68,37 +68,37 @@ type Command struct {
 	BulkString string
 	BulkError  string
 
-	Array []Command
+	Array []RawCmd
 
-	Map       map[*Command]Command
-	Attribute map[*Command]Command
-	Set       map[*Command]bool
+	Map       map[*RawCmd]RawCmd
+	Attribute map[*RawCmd]RawCmd
+	Set       map[*RawCmd]bool
 
 	// TODO: VerbatimStrings, Pushes, BigNumber
 }
 
-func NewNullCommand() Command {
-	return Command{
+func NewNullRawCmd() RawCmd {
+	return RawCmd{
 		Sym: SymNull,
 	}
 }
 
-func NewStringCommand(value string) Command {
-	return Command{
+func NewStringRawCmd(value string) RawCmd {
+	return RawCmd{
 		Sym:    SymString,
 		String: value,
 	}
 }
 
-func NewBulkStringCommand(value string) Command {
-	return Command{
+func NewBulkStringRawCmd(value string) RawCmd {
+	return RawCmd{
 		Sym:        SymBulkString,
 		BulkString: value,
 	}
 }
 
-func NewErrorCommand(value string) Command {
-	return Command{
+func NewErrorRawCmd(value string) RawCmd {
+	return RawCmd{
 		Sym:   SymError,
 		Error: value,
 	}

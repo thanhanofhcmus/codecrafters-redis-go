@@ -7,7 +7,7 @@ import (
 	"github.com/codecrafters-io/redis-starter-go/pkg/types"
 )
 
-func MarshalCommand(cmd types.Command) ([]byte, error) {
+func MarshalCommand(cmd types.RawCmd) ([]byte, error) {
 	var buffer bytes.Buffer
 	err := buildRESPBytes(cmd, &buffer)
 	if err != nil {
@@ -16,7 +16,7 @@ func MarshalCommand(cmd types.Command) ([]byte, error) {
 	return buffer.Bytes(), nil
 }
 
-func buildRESPBytes(cmd types.Command, buffer *bytes.Buffer) error {
+func buildRESPBytes(cmd types.RawCmd, buffer *bytes.Buffer) error {
 	newErr := func(step string, inner error) *EncodingError {
 		return newMarshalError(cmd, step, inner)
 	}

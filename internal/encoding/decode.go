@@ -9,7 +9,7 @@ import (
 	"github.com/codecrafters-io/redis-starter-go/pkg/types"
 )
 
-func UnmarshalCommand(bufReader *bufio.Reader) (types.Command, error) {
+func UnmarshalCommand(bufReader *bufio.Reader) (types.RawCmd, error) {
 	return parseElement(bufReader)
 }
 
@@ -41,20 +41,20 @@ func readNumUntilCRLF(bufReader *bufio.Reader) (int64, error) {
 	return size, nil
 }
 
-func parseSymArray(bufReader *bufio.Reader) (types.Command, error) {
+func parseSymArray(bufReader *bufio.Reader) (types.RawCmd, error) {
 	size, err := readNumUntilCRLF(bufReader)
 	if err != nil {
-		return types.Command{}, fmt.Errorf("read array size failed: %w", err)
+		return types.RawCmd{}, fmt.Errorf("read array size failed: %w", err)
 	}
 
-	var cmd types.Command
+	var cmd types.RawCmd
 	cmd.Sym = types.SymArray
-	cmd.Array = make([]types.Command, 0, size)
+	cmd.Array = make([]types.RawCmd, 0, size)
 
 	for i := range size {
 		elemCmd, err := parseElement(bufReader)
 		if err != nil {
-			return types.Command{}, fmt.Errorf("parse element at position %d failed: %w", i, err)
+			return types.RawCmd{}, fmt.Errorf("parse element at position %d failed: %w", i, err)
 		}
 		cmd.Array = append(cmd.Array, elemCmd)
 	}
@@ -82,8 +82,8 @@ func readLengthAndStringUntilCRLF(bufReader *bufio.Reader) (string, error) {
 	return string(buffer), nil
 }
 
-func parseElement(bufReader *bufio.Reader) (types.Command, error) {
-	var cmd types.Command
+func parseElement(bufReader *bufio.Reader) (types.RawCmd, error) {
+	var cmd types.RawCmd
 
 	newErr := func(step string, inner error) *EncodingError {
 		return newUnmarshalError(cmd, step, inner)
