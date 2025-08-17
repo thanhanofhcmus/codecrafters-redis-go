@@ -15,8 +15,9 @@ type SET struct {
 	GET bool
 
 	SetKey struct {
-		NX bool
-		XX bool
+		Key string `arg:"enum-key"`
+		NX  bool
+		XX  bool
 	} `arg:"enum"`
 
 	Expire struct {

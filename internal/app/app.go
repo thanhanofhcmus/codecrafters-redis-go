@@ -2,7 +2,6 @@ package app
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -83,35 +82,44 @@ func (app *App) handleSET(args []string, _ types.RawCmd) (types.RawCmd, error) {
 		return types.RawCmd{}, err
 	}
 
-	value := value{
-		value: c.Value,
+	oldValue, oldValueExists := app.m[c.Key]
+
+	if c.SetKey.Key != "" {
+		if c.SetKey.NX && oldValueExists {
+			return types.NewNullRawCmd(), nil
+		}
+		if c.SetKey.XX && !oldValueExists {
+			return types.NewNullRawCmd(), nil
+		}
 	}
 
-	/// TODO: handle other args
+	newValue := value{value: c.Value}
 
-	if !c.GET {
-		return types.NewStringRawCmd("OK"), nil
+	if c.Expire.Key != "" {
+		now := time.Now()
+		newValue.shouldExpire = true
+		switch c.Expire.Key {
+		case "EX":
+			newValue.expireAt = now.Add(time.Second * time.Duration(c.Expire.EX))
+		case "PX":
+			newValue.expireAt = now.Add(time.Millisecond * time.Duration(c.Expire.PX))
+		case "EXAT":
+			newValue.expireAt = time.Unix(int64(c.Expire.EXAT), 0)
+		case "PXAT":
+			newValue.expireAt = time.UnixMilli(int64(c.Expire.PXAT))
+		case "KEEPTTL":
+			newValue.shouldExpire = oldValue.shouldExpire
+			newValue.expireAt = oldValue.expireAt
+		default:
+			panic("should not get to here")
+		}
 	}
 
-	if argsLen == 3 {
-		app.m[args[1]] = value
+	app.m[c.Key] = newValue
+
+	if c.GET {
+		return types.NewStringRawCmd(c.Value), nil
 	}
-
-	// args length now is 5
-
-	if strings.ToUpper(args[3]) != "PX" {
-		return types.RawCmd{}, NewInvalidOptionError(args[3])
-	}
-
-	duration, parseErr := strconv.Atoi(args[4])
-	if parseErr != nil {
-		return types.RawCmd{}, fmt.Errorf("parse PX time failed: %w", parseErr)
-	}
-
-	value.shouldExpire = true
-	value.expireAt = time.Now().Add(time.Millisecond * time.Duration(duration))
-
-	app.m[args[1]] = value
 	return types.NewStringRawCmd("OK"), nil
 }
 

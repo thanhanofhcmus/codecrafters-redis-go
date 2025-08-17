@@ -136,7 +136,7 @@ func Parse[T any](args []string) (T, error) {
 			return result, fmt.Errorf("invalid argument `%s`", name)
 		}
 
-		if err := processOptionsAndEnums(args, metadata, value, &idx); err != nil {
+		if err := processOptionsAndEnums(args, name, metadata, value, &idx); err != nil {
 			return result, fmt.Errorf("process `%s` failed: %w", name, err)
 		}
 
@@ -146,7 +146,7 @@ func Parse[T any](args []string) (T, error) {
 	return result, nil
 }
 
-func processOptionsAndEnums(args []string, md optionOrEnumMember, value reflect.Value, idx *int) error {
+func processOptionsAndEnums(args []string, key string, md optionOrEnumMember, value reflect.Value, idx *int) error {
 	if md.option != nil {
 		raw := ""
 		if md.option.kind != reflect.Bool {
@@ -161,7 +161,6 @@ func processOptionsAndEnums(args []string, md optionOrEnumMember, value reflect.
 		}
 	} else if md.enumMember != nil {
 		raw := ""
-		key := args[*idx-1]
 		if md.enumMember.kind != reflect.Bool {
 			if len(args) == *idx {
 				return fmt.Errorf("no value provided")
