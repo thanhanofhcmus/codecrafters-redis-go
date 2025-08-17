@@ -6,7 +6,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/codecrafters-io/redis-starter-go/internal/argsparser"
 	"github.com/codecrafters-io/redis-starter-go/pkg/types"
+	"github.com/codecrafters-io/redis-starter-go/pkg/types/cmd"
 )
 
 type value struct {
@@ -76,17 +78,23 @@ func (app *App) HandleCommand(cmd types.RawCmd) (result types.RawCmd, err error)
 }
 
 func (app *App) handleSET(args []string, _ types.RawCmd) (types.RawCmd, error) {
-	argsLen := len(args)
-	if argsLen != 3 && argsLen != 5 {
-		return types.RawCmd{}, fmt.Errorf("must have at least 3 arguments or 5 with PX")
+	c, err := argsparser.Parse[cmd.SET](args)
+	if err != nil {
+		return types.RawCmd{}, err
 	}
+
 	value := value{
-		value: args[2],
+		value: c.Value,
+	}
+
+	/// TODO: handle other args
+
+	if !c.GET {
+		return types.NewStringRawCmd("OK"), nil
 	}
 
 	if argsLen == 3 {
 		app.m[args[1]] = value
-		return types.NewStringRawCmd("OK"), nil
 	}
 
 	// args length now is 5

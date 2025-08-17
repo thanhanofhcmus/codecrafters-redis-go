@@ -14,11 +14,40 @@ TODO:
 - handle variadic
 - add unimplemented tag for the key present in REDIS but not handle by us now
 - support different fieldName and argName
+- add default tag
 */
+
+var (
+	// TODO: move to use thread safe map
+	parsedCache map[reflect.Type]structMetadata
+)
+
+func init() {
+	parsedCache = map[reflect.Type]structMetadata{}
+}
+
+type fieldType = string
+
+var (
+	fieldTypePosition  fieldType = "pos"
+	fieldTypeOption    fieldType = "opt"
+	fieldTypeEnum      fieldType = "enum"
+	fieldTypeEnumValue fieldType = "enum-value"
+	fieldTypeEnumKey   fieldType = "enum-key"
+
+	fieldTypeAuto = "auto"
+)
+
+type attribute struct {
+	isOptional      bool
+	isUnimplemented bool
+	rawDefault      string
+}
 
 type positionMetadata struct {
 	fieldName string
 	kind      reflect.Kind
+	attribute attribute
 	position  int
 }
 
@@ -26,19 +55,23 @@ type enumMemberMetadata struct {
 	fieldName string
 	argName   string
 	kind      reflect.Kind
+	attribute attribute
 	parent    *enumMetadata
 }
 
 type enumMetadata struct {
 	fieldName string
+	attribute attribute
 	// keys are arg name
-	enumMembers map[string]enumMemberMetadata
+	enumMembers       map[string]enumMemberMetadata
+	storeKeyFieldName string
 }
 
 type optionMetadatada struct {
 	fieldName string
 	argName   string
 	kind      reflect.Kind
+	attribute attribute
 }
 
 type optionOrEnumMember struct {
@@ -56,10 +89,17 @@ type structMetadata struct {
 
 func Parse[T any](args []string) (T, error) {
 	var result T
+	var smd structMetadata
 
-	smd, err := extractTag[T]()
-	if err != nil {
-		return result, err
+	if cached, exists := parsedCache[reflect.TypeFor[T]()]; exists {
+		smd = cached
+	} else {
+		var err error
+		smd, err = extractTag[T]()
+		if err != nil {
+			return result, err
+		}
+		parsedCache[reflect.TypeFor[T]()] = smd
 	}
 
 	length := len(args)
@@ -82,7 +122,7 @@ func Parse[T any](args []string) (T, error) {
 	// handle the mix of options and enums
 	doneFields := map[string]bool{}
 	for idx < length {
-		name := args[idx]
+		name := strings.ToUpper(args[idx])
 		idx += 1
 
 		// TODO: handle enum can only appears one alternative (e.g. "SET a a NX XX")
@@ -96,7 +136,7 @@ func Parse[T any](args []string) (T, error) {
 			return result, fmt.Errorf("invalid argument `%s`", name)
 		}
 
-		if err = processOptionsAndEnums(args, metadata, value, &idx); err != nil {
+		if err := processOptionsAndEnums(args, metadata, value, &idx); err != nil {
 			return result, fmt.Errorf("process `%s` failed: %w", name, err)
 		}
 
@@ -228,6 +268,8 @@ func extractTag[T any]() (structMetadata, error) {
 		}
 	}
 
+	// TODO: validate attributes
+
 	argKeys := map[string]optionOrEnumMember{}
 	for _, omd := range result.options {
 		name := omd.argName
@@ -269,30 +311,34 @@ func extractFieldTag(field reflect.StructField, smd *structMetadata) (err error)
 	kind := field.Type.Kind()
 	fieldName := field.Name
 
-	tag := field.Tag.Get("arg")
-	// TODO: handle multiple value: Foo int `arg:"name:NX,default:100,unimplemented"`
+	fieldType, fieldSnd, attribute, err := parseTag(field.Tag.Get("arg"))
+	if err != nil {
+		return fmt.Errorf("extract tag for field %s failed: %w", fieldName, err)
+	}
 
-	splits := strings.Split(tag, ":")
-
-	switch splits[0] {
-	case "pos":
+	switch fieldType {
+	case fieldTypePosition:
 		if kind == reflect.Bool || !isSimpleKind(kind) {
 			return fmt.Errorf("invalid position argument kind")
 		}
-		if len(splits) != 2 {
+		if fieldSnd == "" {
 			return fmt.Errorf("invalid pos format")
 		}
-		position, err := strconv.Atoi(splits[1])
+		position, err := strconv.Atoi(fieldSnd)
 		if err != nil {
 			return fmt.Errorf("convert position failed %w", err)
 		}
 		smd.positions = append(smd.positions, positionMetadata{
 			fieldName: fieldName,
 			kind:      kind,
+			attribute: attribute,
 			position:  position,
 		})
-	case "enum":
-		emd := enumMetadata{fieldName: fieldName}
+	case fieldTypeEnum:
+		emd := enumMetadata{
+			fieldName: fieldName,
+			attribute: attribute,
+		}
 
 		enumMembers, err := extractEnumMember(field.Type, &emd)
 		if err != nil {
@@ -301,18 +347,60 @@ func extractFieldTag(field reflect.StructField, smd *structMetadata) (err error)
 
 		emd.enumMembers = enumMembers
 		smd.enums = append(smd.enums, emd)
-	case "": // option key
-		// default is a key of that value
+	case fieldTypeOption, fieldTypeAuto:
 		smd.options = append(smd.options, optionMetadatada{
 			fieldName: fieldName,
 			argName:   fieldName,
 			kind:      kind,
+			attribute: attribute,
 		})
 	default:
-		return fmt.Errorf("unknown tag value %s", splits[0])
+		return fmt.Errorf("unknown tag field type %s", fieldType)
 	}
 
 	return
+}
+
+func parseTag(tag string) (fieldType fieldType, fieldSnd string, attribute attribute, err error) {
+	// TODO: handle trim after split
+	fieldType = fieldTypeAuto
+
+	attrParts := strings.Split(tag, ",")
+	if len(attrParts) == 0 {
+		return fieldTypeAuto, "", attribute, nil
+	}
+	firstParts := strings.Split(attrParts[0], ",")
+	if len(firstParts) > 0 {
+		if firstParts[0] != "" {
+			fieldType = firstParts[0]
+		}
+		if len(firstParts) == 2 {
+			fieldSnd = firstParts[1]
+		}
+		// TODO: strict validation, only allow splits of 2
+	}
+	for _, attrRaw := range attrParts[1:] {
+		parts := strings.Split(attrRaw, ",")
+		switch parts[0] {
+		case "default":
+			// TODO:
+			panic("default attribute not handled")
+		case "name":
+			// TODO:
+			panic("name attribute not handled")
+		case "optional":
+			attribute.isOptional = true
+		case "unimplemented":
+			attribute.isUnimplemented = true
+		default:
+			// TODO:
+			panic("attribute not handled")
+		}
+		// TODO: strict validation
+	}
+
+	return
+
 }
 
 func extractEnumMember(t reflect.Type, parent *enumMetadata) (map[string]enumMemberMetadata, error) {
@@ -332,15 +420,32 @@ func extractEnumMember(t reflect.Type, parent *enumMetadata) (map[string]enumMem
 		fieldName := field.Name
 		argName := field.Name
 
-		if !isSimpleKind(fieldKind) {
-			return nil, fmt.Errorf("invalid kind %s", fieldKind)
+		// TODO: validate fieldSnd
+		fieldType, _, attribute, err := parseTag(field.Tag.Get("arg"))
+		if err != nil {
+			return nil, fmt.Errorf("extract tag for field %s failed: %w", fieldName, err)
 		}
 
-		result[argName] = enumMemberMetadata{
-			fieldName: fieldName,
-			argName:   argName,
-			kind:      fieldKind,
-			parent:    parent,
+		switch fieldType {
+		case fieldTypeEnumValue, fieldTypeAuto:
+			if !isSimpleKind(fieldKind) {
+				return nil, fmt.Errorf("invalid kind %s", fieldKind)
+			}
+			result[argName] = enumMemberMetadata{
+				fieldName: fieldName,
+				argName:   argName,
+				kind:      fieldKind,
+				attribute: attribute,
+				parent:    parent,
+			}
+		case fieldTypeEnumKey:
+			// TODO: strict validate no other options
+			if parent.storeKeyFieldName != "" {
+				return nil, fmt.Errorf("cannot have multiple %s tag", fieldTypeEnumKey)
+			}
+			parent.storeKeyFieldName = fieldName
+		default:
+			return nil, fmt.Errorf("invalid tag field type %s", fieldType)
 		}
 	}
 
