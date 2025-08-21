@@ -46,14 +46,29 @@ func buildRESPBytes(cmd types.RawCmd, buffer *bytes.Buffer) error {
 	switch cmd.Sym {
 	case types.SymNull:
 		// RESP3: Do nothing
-
+		if _, err = buffer.Write(CRLF); err != nil {
+			return newErr("write CRLF", err)
+		}
+	case types.SymInteger:
+		if _, err = fmt.Fprint(buffer, cmd.Integer); err != nil {
+			return newErr("write integer", err)
+		}
+		if _, err = buffer.Write(CRLF); err != nil {
+			return newErr("write CRLF", err)
+		}
 	case types.SymString:
 		if _, err = buffer.WriteString(cmd.String); err != nil {
 			return newErr("write string", err)
 		}
+		if _, err = buffer.Write(CRLF); err != nil {
+			return newErr("write CRLF", err)
+		}
 	case types.SymError:
 		if _, err = buffer.WriteString(cmd.Error); err != nil {
 			return newErr("write error", err)
+		}
+		if _, err = buffer.Write(CRLF); err != nil {
+			return newErr("write CRLF", err)
 		}
 	case types.SymBulkString:
 		if _, err = fmt.Fprint(buffer, len(cmd.BulkString)); err != nil {
@@ -64,6 +79,9 @@ func buildRESPBytes(cmd types.RawCmd, buffer *bytes.Buffer) error {
 		}
 		if _, err = buffer.WriteString(cmd.BulkString); err != nil {
 			return newErr("write string", err)
+		}
+		if _, err = buffer.Write(CRLF); err != nil {
+			return newErr("write CRLF", err)
 		}
 	case types.SymArray:
 		if _, err = fmt.Fprint(buffer, len(cmd.Array)); err != nil {
@@ -77,16 +95,8 @@ func buildRESPBytes(cmd types.RawCmd, buffer *bytes.Buffer) error {
 				return newErr("write element", err)
 			}
 		}
-	case types.SymInteger:
-		if _, err = fmt.Fprint(buffer, cmd.Integer); err != nil {
-			return newErr("write integer", err)
-		}
 	default:
 		panic(fmt.Sprintf("unknown symbol type %c", cmd.Sym))
-	}
-
-	if _, err = buffer.Write(CRLF); err != nil {
-		return newErr("write CRLF", err)
 	}
 
 	return nil
