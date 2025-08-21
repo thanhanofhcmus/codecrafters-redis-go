@@ -1,5 +1,9 @@
 package cmd
 
+type LLEN struct {
+	Key string `arg:"pos:1"`
+}
+
 type RPUSH struct {
 	Key    string   `arg:"pos:1"`
 	Values []string `arg:"pos:2,variadic"`

@@ -76,6 +76,8 @@ func (app *App) HandleCommand(cmd types.RawCmd) (result types.RawCmd, err error)
 		result, err = app.handleLPUSH(args)
 	case "LRANGE":
 		result, err = app.handleLRANGE(args)
+	case "LLEN":
+		result, err = app.handleLLEN(args)
 	default:
 		err = fmt.Errorf("unknown command `%s`", command)
 	}
@@ -231,4 +233,19 @@ func (app *App) handleLRANGE(args []string) (types.RawCmd, error) {
 	}
 
 	return types.NewBulkArrayBulkString(value.listValues[start:stop]), nil
+}
+
+func (app *App) handleLLEN(args []string) (types.RawCmd, error) {
+	c, err := argsparser.Parse[cmd.LLEN](args)
+	if err != nil {
+		return types.RawCmd{}, err
+	}
+
+	value, exists := app.m[c.Key]
+	if exists && value.mType != mTypeList {
+		return types.RawCmd{}, NewWrongTypeError(mTypeSimple, value.mType)
+	}
+
+	return types.NewIntegerRawCmd(int64(len(value.listValues))), nil
+
 }
