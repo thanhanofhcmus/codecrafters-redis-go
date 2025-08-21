@@ -58,3 +58,22 @@ func Test_Parse(t *testing.T) {
 	expectNoError(t, err)
 	expectEqual(t, expected, c)
 }
+
+func Test_ParseVariadic(t *testing.T) {
+	args := []string{"RPUSH", "key", "v1", "v2", "v3", "v4"}
+
+	type rpush struct {
+		Key    string   `arg:"pos:1"`
+		Values []string `arg:"pos:2,variadic"`
+	}
+
+	c, err := Parse[rpush](args)
+
+	vs := []string{"v1", "v2", "v3", "v4"}
+
+	expectNoError(t, err)
+	expectEqual(t, "key", c.Key)
+	expectEqual(t, len(vs), len(c.Values))
+
+	t.Log(vs, c.Values)
+}

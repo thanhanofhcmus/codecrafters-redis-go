@@ -11,10 +11,7 @@ import (
 /*
 TODO:
 - handle sub command
-- handle variadic
-- add unimplemented tag for the key present in REDIS but not handle by us now
 - support different fieldName and argName
-- add default tag
 */
 
 var (
@@ -41,6 +38,7 @@ var (
 type attribute struct {
 	isOptional      bool
 	isUnimplemented bool
+	isVariadic      bool
 	rawDefault      string
 }
 
@@ -67,7 +65,7 @@ type enumMetadata struct {
 	storeKeyFieldName string
 }
 
-type optionMetadatada struct {
+type optionMetadata struct {
 	fieldName string
 	argName   string
 	kind      reflect.Kind
@@ -75,14 +73,14 @@ type optionMetadatada struct {
 }
 
 type optionOrEnumMember struct {
-	option     *optionMetadatada
+	option     *optionMetadata
 	enumMember *enumMemberMetadata
 }
 
 type structMetadata struct {
 	positions                []positionMetadata
 	requiredPositionArgsSize int
-	options                  []optionMetadatada
+	options                  []optionMetadata
 	enums                    []enumMetadata
 
 	argKeys map[string]optionOrEnumMember
@@ -103,67 +101,97 @@ func Parse[T any](args []string) (T, error) {
 		parsedCache[reflect.TypeFor[T]()] = smd
 	}
 
-	length := len(args)
 	value := reflect.ValueOf(&result)
 	value = value.Elem()
 	idx := 1
 
-	posIdx := 0
-	posLength := len(smd.positions)
-	// handle required position arguments
-	if idx+smd.requiredPositionArgsSize > length {
-		return result, fmt.Errorf("not enough arguments")
+	if err := parsePositions(args, smd, value, &idx); err != nil {
+		return result, err
 	}
 
-	for idx < length && posIdx < posLength {
-		if err := setFieldValue(value, smd.positions[posIdx].fieldName, args[idx]); err != nil {
-			return result, fmt.Errorf("set required position argument %d failed: %w", posIdx, err)
+	if err := parseOptionsAndEnums(args, smd, value, &idx); err != nil {
+		return result, err
+	}
+
+	return result, nil
+}
+
+func parsePositions(args []string, smd structMetadata, value reflect.Value, idx *int) error {
+	posIdx := 0
+
+	length := len(args)
+	positions := smd.positions
+	posLength := len(smd.positions)
+
+	hasVariadic := posLength >= 0 && positions[posLength-1].attribute.isVariadic
+
+	// handle required position arguments
+	if *idx+smd.requiredPositionArgsSize > length {
+		return fmt.Errorf("not enough arguments")
+	}
+
+	for *idx < length && posIdx < smd.requiredPositionArgsSize {
+		if err := setFieldValue(value, positions[posIdx].fieldName, args[*idx]); err != nil {
+			return fmt.Errorf("set required position argument %d failed: %w", posIdx, err)
 		}
+		*idx += 1
+		posIdx += 1
+	}
+
+	// handle variadic arguments
+	if hasVariadic {
+		if err := setFieldArrayValue(value, positions[posLength-1].fieldName, args[smd.requiredPositionArgsSize+1:]); err != nil {
+			return err
+		}
+		// we have already gone through the whole array
+		*idx = length
+		posIdx = posLength
 	}
 
 	// handle optional position arguments
-	for idx < length && posIdx < posLength {
-		if err := setFieldValue(value, smd.positions[posIdx].fieldName, args[idx]); err != nil {
-			return result, fmt.Errorf("set optional position argument %d failed: %w", posIdx, err)
+	for *idx < length && posIdx < posLength {
+		if err := setFieldValue(value, smd.positions[posIdx].fieldName, args[*idx]); err != nil {
+			return fmt.Errorf("set optional position argument %d failed: %w", posIdx, err)
 		}
-		idx += 1
+		*idx += 1
 		posIdx += 1
 	}
 
 	for posIdx < posLength {
-		if err := setFieldValue(value, smd.positions[posIdx].fieldName, smd.positions[posIdx].attribute.rawDefault); err != nil {
-			return result, fmt.Errorf("set default value for optional position argument %d failed: %w", posIdx, err)
+		if err := setFieldValue(value, positions[posIdx].fieldName, positions[posIdx].attribute.rawDefault); err != nil {
+			return fmt.Errorf("set default value for optional position argument %d failed: %w", posIdx, err)
 		}
 		posIdx += 1
 	}
 
-	// fill in default value for unset optional pos
+	return nil
+}
 
-	// handle the mix of options and enums
+func parseOptionsAndEnums(args []string, smd structMetadata, value reflect.Value, idx *int) error {
+	length := len(args)
 	doneFields := map[string]bool{}
-	for idx < length {
-		name := strings.ToUpper(args[idx])
-		idx += 1
+	for *idx < length {
+		name := strings.ToUpper(args[*idx])
+		*idx += 1
 
 		// TODO: handle enum can only appears one alternative (e.g. "SET a a NX XX")
 
 		if doneFields[name] {
-			return result, fmt.Errorf("argument `%s` appears more than one time", name)
+			return fmt.Errorf("argument `%s` appears more than one time", name)
 		}
 
 		metadata, exists := smd.argKeys[name]
 		if !exists {
-			return result, fmt.Errorf("invalid argument `%s`", name)
+			return fmt.Errorf("invalid argument `%s`", name)
 		}
 
-		if err := processOptionsAndEnums(args, name, metadata, value, &idx); err != nil {
-			return result, fmt.Errorf("process `%s` failed: %w", name, err)
+		if err := processOptionsAndEnums(args, name, metadata, value, idx); err != nil {
+			return fmt.Errorf("process `%s` failed: %w", name, err)
 		}
 
 		doneFields[name] = true
 	}
-
-	return result, nil
+	return nil
 }
 
 func processOptionsAndEnums(args []string, key string, md optionOrEnumMember, value reflect.Value, idx *int) error {
@@ -176,7 +204,7 @@ func processOptionsAndEnums(args []string, key string, md optionOrEnumMember, va
 	}
 }
 
-func processOption(args []string, omd optionMetadatada, value reflect.Value, idx *int) error {
+func processOption(args []string, omd optionMetadata, value reflect.Value, idx *int) error {
 	raw := ""
 	if omd.kind != reflect.Bool {
 		if len(args) == *idx {
@@ -264,6 +292,20 @@ func setSimpleValue(value reflect.Value, raw string) error {
 	return nil
 }
 
+func setFieldArrayValue(value reflect.Value, fieldName string, raws []string) error {
+	fieldValue := value.FieldByName(fieldName)
+
+	slice := reflect.MakeSlice(fieldValue.Type(), len(raws), len(raws))
+	for idx, raw := range raws {
+		elem := slice.Index(idx)
+		if err := setSimpleValue(elem, raw); err != nil {
+			return err
+		}
+	}
+	fieldValue.Set(slice)
+	return nil
+}
+
 func setFieldValue(value reflect.Value, fieldName string, raw string) error {
 	// TODO: validate field exists
 	fieldValue := value.FieldByName(fieldName)
@@ -305,7 +347,8 @@ func extractTag[T any]() (structMetadata, error) {
 	}
 
 	// TODO: validate attributes
-	// tag optional should only be at the last of of pos
+	// tag optional or variadic should only be at the last of of pos
+	// can only have optional or variadic
 
 	argKeys := map[string]optionOrEnumMember{}
 	for _, omd := range result.options {
@@ -337,7 +380,7 @@ func extractTag[T any]() (structMetadata, error) {
 		}
 		seenPos[pmd.position] = true
 		maxPos = max(maxPos, pmd.position)
-		if !pmd.attribute.isOptional {
+		if !pmd.attribute.isOptional && !pmd.attribute.isVariadic {
 			requiredCount += 1
 		}
 	}
@@ -360,8 +403,12 @@ func extractFieldTag(field reflect.StructField, smd *structMetadata) (err error)
 
 	switch fieldType {
 	case fieldTypePosition:
-		if kind == reflect.Bool || !isSimpleKind(kind) {
-			return fmt.Errorf("invalid position argument kind")
+		// TODO: check for reflect.Array
+		if attribute.isVariadic && kind != reflect.Slice {
+			return fmt.Errorf("variadic position argument must have the kind array")
+		}
+		if !attribute.isVariadic && (kind == reflect.Bool || !isSimpleKind(kind)) {
+			return fmt.Errorf("invalid non variadic position argument kind")
 		}
 		if fieldSnd == "" {
 			return fmt.Errorf("invalid pos format")
@@ -390,7 +437,7 @@ func extractFieldTag(field reflect.StructField, smd *structMetadata) (err error)
 		emd.enumMembers = enumMembers
 		smd.enums = append(smd.enums, emd)
 	case fieldTypeOption, fieldTypeAuto:
-		smd.options = append(smd.options, optionMetadatada{
+		smd.options = append(smd.options, optionMetadata{
 			fieldName: fieldName,
 			argName:   fieldName,
 			kind:      kind,
@@ -434,6 +481,8 @@ func parseTag(tag string) (fieldType fieldType, fieldSnd string, attribute attri
 			panic("name attribute not handled")
 		case "optional":
 			attribute.isOptional = true
+		case "variadic":
+			attribute.isVariadic = true
 		case "unimplemented":
 			attribute.isUnimplemented = true
 		default:
@@ -444,7 +493,6 @@ func parseTag(tag string) (fieldType fieldType, fieldSnd string, attribute attri
 	}
 
 	return
-
 }
 
 func extractEnumMember(t reflect.Type, parent *enumMetadata) (map[string]enumMemberMetadata, error) {
