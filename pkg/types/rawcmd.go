@@ -53,3 +53,19 @@ func NewIntegerRawCmd(value int64) RawCmd {
 		Integer: value,
 	}
 }
+
+func NewBulkArrayBulkString(values []string) RawCmd {
+	array := make([]RawCmd, 0, len(values))
+
+	for _, value := range values {
+		array = append(array, RawCmd{
+			Sym:        SymBulkString,
+			BulkString: value,
+		})
+	}
+
+	return RawCmd{
+		Sym:   SymArray,
+		Array: array,
+	}
+}

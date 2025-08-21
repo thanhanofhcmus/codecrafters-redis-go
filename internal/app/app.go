@@ -71,6 +71,8 @@ func (app *App) HandleCommand(cmd types.RawCmd) (result types.RawCmd, err error)
 		result, err = app.handleGET(args)
 	case "RPUSH":
 		result, err = app.handleRPUSH(args)
+	case "LRANGE":
+		result, err = app.handleLRANGE(args)
 	default:
 		err = fmt.Errorf("unknown command `%s`", command)
 	}
@@ -179,4 +181,21 @@ func (app *App) handleRPUSH(args []string) (types.RawCmd, error) {
 	app.m[c.Key] = value
 
 	return types.NewIntegerRawCmd(int64(len(value.listValues))), nil
+}
+
+func (app *App) handleLRANGE(args []string) (types.RawCmd, error) {
+	c, err := argsparser.Parse[cmd.LRANGE](args)
+	if err != nil {
+		return types.RawCmd{}, err
+	}
+
+	value, exists := app.m[c.Key]
+	length := len(value.listValues)
+	start, stop := c.Start, min(len(value.listValues), c.Stop)
+
+	if !exists || start > length || start >= stop {
+		return types.NewBulkArrayBulkString(nil), nil
+	}
+
+	return types.NewBulkArrayBulkString(value.listValues[start:stop]), nil
 }
