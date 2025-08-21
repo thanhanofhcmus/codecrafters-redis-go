@@ -191,7 +191,17 @@ func (app *App) handleLRANGE(args []string) (types.RawCmd, error) {
 
 	value, exists := app.m[c.Key]
 	length := len(value.listValues)
-	start, stop := c.Start, min(len(value.listValues), c.Stop+1)
+
+	start := c.Start
+	if start < 0 {
+		start = max(0, length+start)
+	}
+
+	stop := c.Stop
+	if stop < 0 {
+		stop = max(0, length+stop)
+	}
+	stop = min(stop+1, length)
 
 	if !exists || start > length || start >= stop {
 		return types.NewBulkArrayBulkString(nil), nil
