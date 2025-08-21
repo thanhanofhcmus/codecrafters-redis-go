@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -71,6 +72,8 @@ func (app *App) HandleCommand(cmd types.RawCmd) (result types.RawCmd, err error)
 		result, err = app.handleGET(args)
 	case "RPUSH":
 		result, err = app.handleRPUSH(args)
+	case "LPUSH":
+		result, err = app.handleLPUSH(args)
 	case "LRANGE":
 		result, err = app.handleLRANGE(args)
 	default:
@@ -177,6 +180,26 @@ func (app *App) handleRPUSH(args []string) (types.RawCmd, error) {
 	}
 	value.mType = mTypeList
 	value.listValues = append(value.listValues, c.Values...)
+
+	app.m[c.Key] = value
+
+	return types.NewIntegerRawCmd(int64(len(value.listValues))), nil
+}
+
+func (app *App) handleLPUSH(args []string) (types.RawCmd, error) {
+	c, err := argsparser.Parse[cmd.LPUSH](args)
+	if err != nil {
+		return types.RawCmd{}, err
+	}
+
+	value, exists := app.m[c.Key]
+	if exists && value.mType != mTypeList {
+		return types.RawCmd{}, NewWrongTypeError(mTypeSimple, value.mType)
+	}
+	value.mType = mTypeList
+
+	slices.Reverse(c.Values)
+	value.listValues = append(c.Values, value.listValues...)
 
 	app.m[c.Key] = value
 

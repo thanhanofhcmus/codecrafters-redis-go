@@ -5,6 +5,11 @@ type RPUSH struct {
 	Values []string `arg:"pos:2,variadic"`
 }
 
+type LPUSH struct {
+	Key    string   `arg:"pos:1"`
+	Values []string `arg:"pos:2,variadic"`
+}
+
 type LRANGE struct {
 	Key   string `arg:"pos:1"`
 	Start int    `arg:"pos:2"`
