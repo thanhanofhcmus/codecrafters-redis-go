@@ -90,3 +90,17 @@ func NewArrayElementError(index int, err error) ArrayElementError {
 		Err:   err,
 	}
 }
+
+type WrongTypeError struct {
+}
+
+func (WrongTypeError) Error() string {
+	return "WRONGTYPE Operation against a key holding the wrong kind of value"
+}
+
+func NewWrongTypeError(expected, actual mType) WrongTypeError {
+	_ = expected
+	_ = actual
+
+	return WrongTypeError{}
+}

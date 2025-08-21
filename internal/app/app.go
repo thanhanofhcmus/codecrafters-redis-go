@@ -10,8 +10,17 @@ import (
 	"github.com/codecrafters-io/redis-starter-go/pkg/types/cmd"
 )
 
+type mType int
+
+const (
+	mTypeSimple mType = iota
+	mTypeList
+)
+
 type value struct {
 	value        string
+	listValues   []string
+	mType        mType
 	shouldExpire bool
 	expireAt     time.Time
 }
@@ -59,7 +68,9 @@ func (app *App) HandleCommand(cmd types.RawCmd) (result types.RawCmd, err error)
 	case "SET":
 		result, err = app.handleSET(args)
 	case "GET":
-		result, err = app.handleGET(args, cmd)
+		result, err = app.handleGET(args)
+	case "RPUSH":
+		result, err = app.handleRPUSH(args)
 	default:
 		err = fmt.Errorf("unknown command `%s`", command)
 	}
@@ -104,7 +115,7 @@ func (app *App) handleSET(args []string) (types.RawCmd, error) {
 		}
 	}
 
-	newValue := value{value: c.Value}
+	newValue := value{value: c.Value, mType: mTypeSimple}
 
 	if c.Expire.Key != "" {
 		now := time.Now()
@@ -134,17 +145,38 @@ func (app *App) handleSET(args []string) (types.RawCmd, error) {
 	return types.NewStringRawCmd("OK"), nil
 }
 
-func (app *App) handleGET(args []string, _ types.RawCmd) (types.RawCmd, error) {
-	if len(args) != 2 {
-		return types.RawCmd{}, fmt.Errorf("invalid number of arguments")
+func (app *App) handleGET(args []string) (types.RawCmd, error) {
+	c, err := argsparser.Parse[cmd.GET](args)
+	if err != nil {
+		return types.RawCmd{}, err
 	}
 	cmd := types.NewNullRawCmd()
-	if value, exists := app.m[args[1]]; exists {
+	if value, exists := app.m[c.Key]; exists {
 		if value.shouldExpire && time.Now().After(value.expireAt) {
 			delete(app.m, args[1])
+		} else if value.mType != mTypeSimple {
+			return types.RawCmd{}, NewWrongTypeError(mTypeSimple, value.mType)
 		} else {
 			cmd = types.NewBulkStringRawCmd(value.value)
 		}
 	}
 	return cmd, nil
+}
+
+func (app *App) handleRPUSH(args []string) (types.RawCmd, error) {
+	c, err := argsparser.Parse[cmd.RPUSH](args)
+	if err != nil {
+		return types.RawCmd{}, err
+	}
+
+	value, exists := app.m[c.Key]
+	if exists && value.mType != mTypeList {
+		return types.RawCmd{}, NewWrongTypeError(mTypeSimple, value.mType)
+	}
+	value.mType = mTypeList
+	value.listValues = append(value.listValues, c.Values...)
+
+	app.m[c.Key] = value
+
+	return types.NewIntegerRawCmd(int64(len(value.listValues))), nil
 }

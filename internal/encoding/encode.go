@@ -77,6 +77,10 @@ func buildRESPBytes(cmd types.RawCmd, buffer *bytes.Buffer) error {
 				return newErr("write element", err)
 			}
 		}
+	case types.SymInteger:
+		if _, err = fmt.Fprint(buffer, cmd.Integer); err != nil {
+			return newErr("write integer", err)
+		}
 	default:
 		panic(fmt.Sprintf("unknown symbol type %c", cmd.Sym))
 	}

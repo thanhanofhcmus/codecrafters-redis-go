@@ -46,3 +46,10 @@ func NewErrorRawCmd(value string) RawCmd {
 		Error: value,
 	}
 }
+
+func NewIntegerRawCmd(value int64) RawCmd {
+	return RawCmd{
+		Sym:     SymInteger,
+		Integer: value,
+	}
+}
