@@ -2,11 +2,13 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net"
+	"time"
 
 	"github.com/codecrafters-io/redis-starter-go/internal/app"
 	"github.com/codecrafters-io/redis-starter-go/internal/encoding"
@@ -14,6 +16,7 @@ import (
 )
 
 func handleConn(app *app.App, conn net.Conn) {
+	// TODO: timeout with SetWriteDeadline
 	bufReader := bufio.NewReader(conn)
 	for {
 		var err error
@@ -37,7 +40,10 @@ func handleConn(app *app.App, conn net.Conn) {
 			return
 		}
 
-		resp, err := app.HandleCommand(res)
+		ctx, cancelFn := context.WithTimeout(context.Background(), time.Second*30)
+		defer cancelFn()
+
+		resp, err := app.HandleCommand(ctx, res)
 		if err != nil {
 			return
 		}
@@ -47,6 +53,7 @@ func handleConn(app *app.App, conn net.Conn) {
 			return
 		}
 
+		// TODO: timeout with SetWriteDeadline
 		_, err = conn.Write(respByte)
 		if err != nil {
 			log.Println("Failed to response", err)

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"strings"
@@ -26,8 +27,16 @@ type value struct {
 	expireAt     time.Time
 }
 
+type keyValue struct {
+	key   string
+	value value
+}
+
 type App struct {
+	// TODO: make this thread safe
 	m map[string]value
+
+	newKeyCh chan keyValue
 }
 
 func convertArgsCmdToString(cmd types.RawCmd) ([]string, error) {
@@ -54,7 +63,7 @@ func NewApp() *App {
 	}
 }
 
-func (app *App) HandleCommand(cmd types.RawCmd) (result types.RawCmd, err error) {
+func (app *App) HandleCommand(ctx context.Context, cmd types.RawCmd) (result types.RawCmd, err error) {
 	args, err := convertArgsCmdToString(cmd)
 	if err != nil {
 		return types.RawCmd{}, err
@@ -80,6 +89,8 @@ func (app *App) HandleCommand(cmd types.RawCmd) (result types.RawCmd, err error)
 		result, err = app.handleLLEN(args)
 	case "LPOP":
 		result, err = app.handleLPOP(args)
+	case "BLPOP":
+		result, err = app.handleBLPOP(ctx, args)
 	default:
 		err = fmt.Errorf("unknown command `%s`", command)
 	}
@@ -272,20 +283,63 @@ func (app *App) handleLPOP(args []string) (types.RawCmd, error) {
 		if length == 0 {
 			return types.NewNullRawCmd(), nil
 		}
-		v, rest := value.listValues[0], value.listValues[1:]
-		value.listValues = rest
+		v := ""
+		v, value.listValues = splitListOne(value.listValues)
 		app.m[c.Key] = value
 		return types.NewBulkStringRawCmd(v), nil
 	}
 
-	count := *c.Count
-	// TODO: check for negative value
-	count = max(count, 0)
-	count = min(count, length-1)
-
-	vs, rest := value.listValues[:count], value.listValues[count:]
-	value.listValues = rest
+	vs := []string{}
+	vs, value.listValues = splitList(value.listValues, *c.Count)
 	app.m[c.Key] = value
 
 	return types.NewBulkArrayBulkString(vs), nil
+}
+
+func (app *App) handleBLPOP(ctx context.Context, args []string) (types.RawCmd, error) {
+	c, err := argsparser.Parse[cmd.BLPOP](args)
+	if err != nil {
+		return types.RawCmd{}, err
+	}
+
+	// TODO: support multi list
+	if len(c.KeyRest) != 0 {
+		return types.NewNullRawCmd(), NewHandleCommandError("BLPOP", fmt.Errorf("multi keys is not supported"))
+	}
+
+	v := ""
+
+	// non blocking
+	value, exists := app.m[c.Key]
+	if exists && len(value.listValues) > 0 {
+		v, value.listValues = splitListOne(value.listValues)
+		app.m[c.Key] = value
+		return types.NewBulkArrayBulkString([]string{c.Key, v}), nil
+	}
+
+	_ = ctx
+	// TODO: implement true timeout infinite
+	// timeoutDuration := time.Hour * 100
+	// if c.TimeoutSecond != 0 {
+	// 	timeoutDuration = time.Second * time.Duration(c.TimeoutSecond)
+	// }
+	// select {
+	// case <-ctx.Done():
+	// 	// TODO: handle timeout error
+	// case <-time.After(timeoutDuration):
+	// 	//
+	// }
+
+	return types.NewNullRawCmd(), nil
+}
+
+func splitList[T any](l []T, count int) ([]T, []T) {
+	count = max(count, 0)
+	count = min(count, len(l)-1)
+	return l[:count], l[count:]
+}
+
+func splitListOne[T any](l []T) (T, []T) {
+	a, b := splitList(l, 1)
+	return a[0], b
 }

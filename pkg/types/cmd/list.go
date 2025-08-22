@@ -24,3 +24,9 @@ type LPOP struct {
 	Key   string `arg:"pos:1"`
 	Count *int   `arg:"pos:2,optional"`
 }
+
+type BLPOP struct {
+	Key           string   `arg:"pos:1"`
+	KeyRest       []string `arg:"pos:2,variadic"`
+	TimeoutSecond float64  `arg:"pos:3"`
+}
