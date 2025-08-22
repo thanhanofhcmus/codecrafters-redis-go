@@ -25,30 +25,50 @@ type setStruct struct {
 	} `arg:"enum"`
 }
 
-func expectNoError(t *testing.T, err error) {
+func expectNoError(t *testing.T, err error) bool {
 	if err != nil {
 		t.Error("expect no error but got:", err)
+		return false
 	}
+	return true
 }
 
-func expectEqual[T comparable](t *testing.T, expected, actual T) {
+func expectEqual[T comparable](t *testing.T, expected, actual T) bool {
 	if expected != actual {
 		t.Errorf("expect equal\nexepcted=%+v\n  actual=%+v", expected, actual)
+		return false
 	}
+	return true
 }
 
-func expectNil[T any](t *testing.T, v *T) {
+func expectEqualSlice[T comparable](t *testing.T, expected, actual []T) bool {
+	if len(expected) != len(actual) {
+		t.Errorf("expect array length equal\nexepcted=%+v\n  actual=%+v", len(expected), len(actual))
+		return false
+	}
+	for idx := range len(expected) {
+		e, a := expected[idx], actual[idx]
+		if !expectEqual(t, e, a) {
+			return false
+		}
+	}
+	return true
+}
+
+func expectNil[T any](t *testing.T, v *T) bool {
 	if v != nil {
 		t.Error("expect nil but got value")
+		return false
 	}
+	return true
 }
 
-func expectNoNilEqual[T comparable](t *testing.T, expected T, v *T) {
+func expectNoNilEqual[T comparable](t *testing.T, expected T, v *T) bool {
 	if v == nil {
 		t.Error("expect no nil but got value")
-		return
+		return false
 	}
-	expectEqual(t, expected, *v)
+	return expectEqual(t, expected, *v)
 }
 
 func Test_extractTag(t *testing.T) {
@@ -83,13 +103,28 @@ func Test_ParseVariadic(t *testing.T) {
 
 	c, err := Parse[rpush](args)
 
-	vs := []string{"v1", "v2", "v3", "v4"}
-
 	expectNoError(t, err)
 	expectEqual(t, "key", c.Key)
-	expectEqual(t, len(vs), len(c.Values))
+	expectEqualSlice(t, []string{"v1", "v2", "v3", "v4"}, c.Values)
+}
 
-	t.Log(vs, c.Values)
+func Test_ParseVariadicRequiredAfter(t *testing.T) {
+	args := []string{"BLPOP", "l1", "l2", "l3", "120", "another"}
+
+	type blpop struct {
+		Key      string   `arg:"pos:1"`
+		RestKeys []string `arg:"pos:2,variadic"`
+		Timeout  int      `arg:"pos:3"`
+		TestKey  string   `arg:"pos:4"`
+	}
+
+	c, err := Parse[blpop](args)
+
+	expectNoError(t, err)
+	expectEqual(t, "l1", c.Key)
+	expectEqualSlice(t, []string{"l2", "l3"}, c.RestKeys)
+	expectEqual(t, 120, c.Timeout)
+	expectEqual(t, "another", c.TestKey)
 }
 
 func Test_ParseOptionalPositionPointer(t *testing.T) {

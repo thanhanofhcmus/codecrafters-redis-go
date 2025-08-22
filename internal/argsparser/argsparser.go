@@ -78,10 +78,12 @@ type optionOrEnumMember struct {
 }
 
 type structMetadata struct {
-	positions                []positionMetadata
-	requiredPositionArgsSize int
-	options                  []optionMetadata
-	enums                    []enumMetadata
+	positions                     []positionMetadata
+	variadicPositionArgIndex      int
+	optionalPositionArgStartIndex int
+
+	options []optionMetadata
+	enums   []enumMetadata
 
 	argKeys map[string]optionOrEnumMember
 }
@@ -117,20 +119,29 @@ func Parse[T any](args []string) (T, error) {
 }
 
 func parsePositions(args []string, smd structMetadata, value reflect.Value, idx *int) error {
+	if smd.variadicPositionArgIndex != -1 {
+		return parsePositionsVariadic(args, smd, value, idx)
+	}
+	return parsePositionsOptional(args, smd, value, idx)
+}
+
+func parsePositionsVariadic(args []string, smd structMetadata, value reflect.Value, idx *int) error {
 	posIdx := 0
 
-	length := len(args)
 	positions := smd.positions
+	argsLength := len(args)
 	posLength := len(smd.positions)
 
-	hasVariadic := posLength >= 0 && positions[posLength-1].attribute.isVariadic
+	variadicStartIdx := smd.variadicPositionArgIndex
+	variadicArgsLength := argsLength - (posLength - 1)
+	variadicEndIdx := variadicStartIdx + variadicArgsLength
 
-	// handle required position arguments
-	if *idx+smd.requiredPositionArgsSize > length {
-		return fmt.Errorf("not enough arguments")
+	if argsLength < variadicStartIdx || variadicArgsLength < 0 {
+		return fmt.Errorf("not enough required arguments")
 	}
 
-	for *idx < length && posIdx < smd.requiredPositionArgsSize {
+	// handle required arguments before variadic argument
+	for *idx < argsLength && posIdx < variadicStartIdx {
 		if err := setFieldValue(value, positions[posIdx].fieldName, args[*idx]); err != nil {
 			return fmt.Errorf("set required position argument %d failed: %w", posIdx, err)
 		}
@@ -139,17 +150,47 @@ func parsePositions(args []string, smd structMetadata, value reflect.Value, idx 
 	}
 
 	// handle variadic arguments
-	if hasVariadic {
-		if err := setFieldArrayValue(value, positions[posLength-1].fieldName, args[smd.requiredPositionArgsSize+1:]); err != nil {
-			return err
+	variadictArgs := args[variadicStartIdx+1 : variadicEndIdx]
+	if err := setFieldArrayValue(value, positions[smd.variadicPositionArgIndex].fieldName, variadictArgs); err != nil {
+		return err
+	}
+	*idx += variadicArgsLength - 1
+	posIdx += 1
+
+	// handle required arguments after variadic argument
+	for *idx < argsLength {
+		if err := setFieldValue(value, positions[posIdx].fieldName, args[*idx]); err != nil {
+			return fmt.Errorf("set required position argument %d failed: %w", posIdx, err)
 		}
-		// we have already gone through the whole array
-		*idx = length
-		posIdx = posLength
+		*idx += 1
+		posIdx += 1
+	}
+
+	return nil
+}
+
+func parsePositionsOptional(args []string, smd structMetadata, value reflect.Value, idx *int) error {
+	posIdx := 0
+
+	positions := smd.positions
+	argsLength := len(args)
+	posLength := len(smd.positions)
+
+	if argsLength < smd.optionalPositionArgStartIndex {
+		return fmt.Errorf("not enough required arguments")
+	}
+
+	// handle required position arguments
+	for *idx < argsLength && posIdx < smd.optionalPositionArgStartIndex {
+		if err := setFieldValue(value, positions[posIdx].fieldName, args[*idx]); err != nil {
+			return fmt.Errorf("set required position argument %d failed: %w", posIdx, err)
+		}
+		*idx += 1
+		posIdx += 1
 	}
 
 	// handle optional position arguments
-	for *idx < length && posIdx < posLength {
+	for *idx < argsLength && posIdx < posLength {
 		if err := setFieldValue(value, smd.positions[posIdx].fieldName, args[*idx]); err != nil {
 			return fmt.Errorf("set optional position argument %d failed: %w", posIdx, err)
 		}
@@ -168,6 +209,7 @@ func parsePositions(args []string, smd structMetadata, value reflect.Value, idx 
 	}
 
 	return nil
+
 }
 
 func parseOptionsAndEnums(args []string, smd structMetadata, value reflect.Value, idx *int) error {
@@ -356,50 +398,85 @@ func extractTag[T any]() (structMetadata, error) {
 		}
 	}
 
+	if err := validateAndFillMetadata(&result); err != nil {
+		return structMetadata{}, err
+	}
+
+	return result, nil
+}
+
+func validateAndFillMetadata(result *structMetadata) error {
 	// TODO: validate attributes
-	// tag optional or variadic should only be at the last of of pos
+	// tag optional should only be at the last of of pos
 	// can only have optional or variadic
+	// there must be only one variadic
+
+	// position arguments
+
+	seenPos := map[int]bool{}
+	isInOptional := false
+
+	result.variadicPositionArgIndex = -1
+	result.optionalPositionArgStartIndex = -1
+
+	slices.SortFunc(result.positions, func(a positionMetadata, b positionMetadata) int {
+		return a.position - b.position
+	})
+	for idx, pmd := range result.positions {
+		if seenPos[pmd.position] {
+			return fmt.Errorf("position %d appears more than one time", pmd.position)
+		}
+		seenPos[pmd.position] = true
+
+		isInOptional = isInOptional || pmd.attribute.isOptional
+
+		if pmd.attribute.isVariadic {
+			if isInOptional {
+				return fmt.Errorf("has optional and variadic position arguments at the same time")
+			}
+			if result.variadicPositionArgIndex != -1 {
+				return fmt.Errorf("has more than one variadic position argument")
+			}
+			result.variadicPositionArgIndex = idx
+			continue
+		}
+
+		if pmd.attribute.isOptional {
+			if !isInOptional {
+				return fmt.Errorf("position %d is a required value appears after optional value", pmd.position)
+			}
+			result.optionalPositionArgStartIndex = idx
+		}
+	}
+	if length := len(seenPos); length != result.positions[length-1].position {
+		return fmt.Errorf("max position is not them same as the number of position arguments")
+	}
+
+	// options and enums arguments
 
 	argKeys := map[string]optionOrEnumMember{}
 	for _, omd := range result.options {
 		name := omd.argName
 		if _, exists := argKeys[name]; exists {
-			return structMetadata{}, fmt.Errorf("option or enum member with name `%s` already exists", name)
+			return fmt.Errorf("option or enum member with name `%s` already exists", name)
 		}
 		argKeys[name] = optionOrEnumMember{option: &omd}
 	}
 	for _, emd := range result.enums {
 		for name, emmd := range emd.enumMembers {
 			if _, exists := argKeys[name]; exists {
-				return structMetadata{}, fmt.Errorf("option or enum member with name `%s` already exists", name)
+				return fmt.Errorf("option or enum member with name `%s` already exists", name)
 			}
 			argKeys[name] = optionOrEnumMember{enumMember: &emmd}
 		}
 	}
 	result.argKeys = argKeys
 
-	seenPos := map[int]bool{}
-	maxPos := -1
-	requiredCount := 0
-	slices.SortFunc(result.positions, func(a positionMetadata, b positionMetadata) int {
-		return a.position - b.position
-	})
-	for _, pmd := range result.positions {
-		if seenPos[pmd.position] {
-			return structMetadata{}, fmt.Errorf("position %d appears more than one time", pmd.position)
-		}
-		seenPos[pmd.position] = true
-		maxPos = max(maxPos, pmd.position)
-		if !pmd.attribute.isOptional && !pmd.attribute.isVariadic {
-			requiredCount += 1
-		}
+	if result.variadicPositionArgIndex != -1 && len(argKeys) != 0 {
+		return fmt.Errorf("has variadic position argument and option enum argument at the same time")
 	}
-	if maxPos != len(seenPos) {
-		return structMetadata{}, fmt.Errorf("max position %d is not them same as the number of position arguments %d", maxPos, len(seenPos))
-	}
-	result.requiredPositionArgsSize = requiredCount
 
-	return result, nil
+	return nil
 }
 
 func extractFieldTag(field reflect.StructField, smd *structMetadata) (err error) {
