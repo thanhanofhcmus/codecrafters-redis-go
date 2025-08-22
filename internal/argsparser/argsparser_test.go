@@ -37,6 +37,20 @@ func expectEqual[T comparable](t *testing.T, expected, actual T) {
 	}
 }
 
+func expectNil[T any](t *testing.T, v *T) {
+	if v != nil {
+		t.Error("expect nil but got value")
+	}
+}
+
+func expectNoNilEqual[T comparable](t *testing.T, expected T, v *T) {
+	if v == nil {
+		t.Error("expect no nil but got value")
+		return
+	}
+	expectEqual(t, expected, *v)
+}
+
 func Test_extractTag(t *testing.T) {
 	_, err := extractTag[setStruct]()
 	expectNoError(t, err)
@@ -76,4 +90,23 @@ func Test_ParseVariadic(t *testing.T) {
 	expectEqual(t, len(vs), len(c.Values))
 
 	t.Log(vs, c.Values)
+}
+
+func Test_ParseOptionalPositionPointer(t *testing.T) {
+	type lpop struct {
+		Key   string `arg:"pos:1"`
+		Count *int   `arg:"pos:2,optional"`
+	}
+
+	c1, err1 := Parse[lpop]([]string{"LPOP", "key_1"})
+
+	expectNoError(t, err1)
+	expectEqual(t, "key_1", c1.Key)
+	expectNil(t, c1.Count)
+
+	c2, err2 := Parse[lpop]([]string{"LPOP", "key_2", "12"})
+
+	expectNoError(t, err2)
+	expectEqual(t, "key_2", c2.Key)
+	expectNoNilEqual(t, 12, c2.Count)
 }

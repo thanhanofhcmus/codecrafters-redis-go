@@ -157,9 +157,12 @@ func parsePositions(args []string, smd structMetadata, value reflect.Value, idx 
 		posIdx += 1
 	}
 
+	// handle default value for optional position arguments
 	for posIdx < posLength {
-		if err := setFieldValue(value, positions[posIdx].fieldName, positions[posIdx].attribute.rawDefault); err != nil {
-			return fmt.Errorf("set default value for optional position argument %d failed: %w", posIdx, err)
+		if pmd := positions[posIdx]; pmd.attribute.rawDefault != "" {
+			if err := setFieldValue(value, pmd.fieldName, pmd.attribute.rawDefault); err != nil {
+				return fmt.Errorf("set default value for optional position argument %d failed: %w", posIdx, err)
+			}
 		}
 		posIdx += 1
 	}
@@ -309,8 +312,15 @@ func setFieldArrayValue(value reflect.Value, fieldName string, raws []string) er
 func setFieldValue(value reflect.Value, fieldName string, raw string) error {
 	// TODO: validate field exists
 	fieldValue := value.FieldByName(fieldName)
+
+	if fieldValue.Kind() == reflect.Pointer {
+		ptrValue := reflect.New(fieldValue.Type().Elem())
+		fieldValue.Set(ptrValue)
+		fieldValue = fieldValue.Elem()
+	}
+
 	if err := setSimpleValue(fieldValue, raw); err != nil {
-		return fmt.Errorf("set value for option field %s: %w", fieldName, err)
+		return fmt.Errorf("set value for field %s: %w", fieldName, err)
 	}
 	return nil
 }
@@ -403,12 +413,22 @@ func extractFieldTag(field reflect.StructField, smd *structMetadata) (err error)
 
 	switch fieldType {
 	case fieldTypePosition:
-		// TODO: check for reflect.Array
-		if attribute.isVariadic && kind != reflect.Slice {
-			return fmt.Errorf("variadic position argument must have the kind array")
+		if kind == reflect.Bool {
+			return fmt.Errorf("invalid position argument must not be of boolean type")
 		}
-		if !attribute.isVariadic && (kind == reflect.Bool || !isSimpleKind(kind)) {
-			return fmt.Errorf("invalid non variadic position argument kind")
+		if attribute.isVariadic {
+			// TODO: check for reflect.Array
+			if kind != reflect.Slice {
+				return fmt.Errorf("variadic position argument must have the kind array")
+			}
+		} else {
+			elemKind := kind
+			if elemKind == reflect.Pointer {
+				elemKind = field.Type.Elem().Kind()
+			}
+			if !isSimpleKind(elemKind) {
+				return fmt.Errorf("invalid non variadic position argument kind")
+			}
 		}
 		if fieldSnd == "" {
 			return fmt.Errorf("invalid pos format")
@@ -483,6 +503,7 @@ func parseTag(tag string) (fieldType fieldType, fieldSnd string, attribute attri
 			attribute.isOptional = true
 		case "variadic":
 			attribute.isVariadic = true
+			// TODO: remove unimplemented since we not get it here
 		case "unimplemented":
 			attribute.isUnimplemented = true
 		default:

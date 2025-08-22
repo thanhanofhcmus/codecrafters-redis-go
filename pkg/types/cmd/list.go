@@ -19,3 +19,8 @@ type LRANGE struct {
 	Start int    `arg:"pos:2"`
 	Stop  int    `arg:"pos:3"`
 }
+
+type LPOP struct {
+	Key   string `arg:"pos:1"`
+	Count *int   `arg:"pos:2,optional"`
+}

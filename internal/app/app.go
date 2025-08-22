@@ -78,6 +78,8 @@ func (app *App) HandleCommand(cmd types.RawCmd) (result types.RawCmd, err error)
 		result, err = app.handleLRANGE(args)
 	case "LLEN":
 		result, err = app.handleLLEN(args)
+	case "LPOP":
+		result, err = app.handleLPOP(args)
 	default:
 		err = fmt.Errorf("unknown command `%s`", command)
 	}
@@ -248,4 +250,42 @@ func (app *App) handleLLEN(args []string) (types.RawCmd, error) {
 
 	return types.NewIntegerRawCmd(int64(len(value.listValues))), nil
 
+}
+
+func (app *App) handleLPOP(args []string) (types.RawCmd, error) {
+	c, err := argsparser.Parse[cmd.LPOP](args)
+	if err != nil {
+		return types.RawCmd{}, err
+	}
+
+	value, exists := app.m[c.Key]
+	if !exists {
+		return types.NewNullRawCmd(), nil
+	}
+	if exists && value.mType != mTypeList {
+		return types.RawCmd{}, NewWrongTypeError(mTypeSimple, value.mType)
+	}
+
+	length := len(value.listValues)
+
+	if c.Count == nil {
+		if length == 0 {
+			return types.NewNullRawCmd(), nil
+		}
+		v, rest := value.listValues[0], value.listValues[1:]
+		value.listValues = rest
+		app.m[c.Key] = value
+		return types.NewBulkStringRawCmd(v), nil
+	}
+
+	count := *c.Count
+	// TODO: check for negative value
+	count = max(count, 0)
+	count = min(count, length-1)
+
+	vs, rest := value.listValues[:count], value.listValues[count:]
+	value.listValues = rest
+	app.m[c.Key] = value
+
+	return types.NewBulkArrayBulkString(vs), nil
 }
