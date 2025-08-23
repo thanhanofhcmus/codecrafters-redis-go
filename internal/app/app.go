@@ -12,31 +12,24 @@ import (
 	"github.com/codecrafters-io/redis-starter-go/pkg/types/cmd"
 )
 
-type mType int
+type ValueType int
 
 const (
-	mTypeSimple mType = iota
-	mTypeList
+	ValueTypeSimple ValueType = iota
+	ValueTypeList
 )
 
 type value struct {
-	value        string
-	listValues   []string
-	mType        mType
-	shouldExpire bool
-	expireAt     time.Time
-}
-
-type keyValue struct {
-	key   string
-	value value
+	Key       string
+	ValueType ValueType
+	String    string
+	List      []string
 }
 
 type App struct {
 	// TODO: make this thread safe
-	m map[string]value
-
-	newKeyCh chan keyValue
+	dict   map[string]value
+	expiry map[string]time.Time
 }
 
 func convertArgsCmdToString(cmd types.RawCmd) ([]string, error) {
@@ -59,7 +52,7 @@ func convertArgsCmdToString(cmd types.RawCmd) ([]string, error) {
 
 func NewApp() *App {
 	return &App{
-		m: map[string]value{},
+		dict: map[string]value{},
 	}
 }
 
@@ -75,9 +68,9 @@ func (app *App) HandleCommand(ctx context.Context, cmd types.RawCmd) (result typ
 	case "PING":
 		result, err = app.handlePING(args)
 	case "ECHO":
-
-		// strings
 		result, err = app.handleECHO(args)
+
+	// strings
 	case "SET":
 		result, err = app.handleSET(args)
 	case "GET":
@@ -85,7 +78,7 @@ func (app *App) HandleCommand(ctx context.Context, cmd types.RawCmd) (result typ
 	case "APPEND":
 		result, err = app.handleAPPEND(args)
 
-		// list
+	// list
 	case "RPUSH":
 		result, err = app.handleRPUSH(args)
 	case "LPUSH":
@@ -131,10 +124,10 @@ func (app *App) handleAPPEND(args []string) (types.RawCmd, error) {
 		return types.RawCmd{}, err
 	}
 
-	value := app.m[c.Key]
-	value.value += c.Value
+	value := app.dict[c.Key]
+	value.String += c.Value
 
-	return types.NewIntegerRawCmd(int64(len(value.value))), nil
+	return types.NewIntegerRawCmd(int64(len(value.String))), nil
 }
 
 func (app *App) handleSET(args []string) (types.RawCmd, error) {
@@ -143,7 +136,7 @@ func (app *App) handleSET(args []string) (types.RawCmd, error) {
 		return types.RawCmd{}, err
 	}
 
-	oldValue, oldValueExists := app.m[c.Key]
+	_, oldValueExists := app.dict[c.Key]
 
 	if c.SetKey.Key != "" {
 		if c.SetKey.NX && oldValueExists {
@@ -154,29 +147,33 @@ func (app *App) handleSET(args []string) (types.RawCmd, error) {
 		}
 	}
 
-	newValue := value{value: c.Value, mType: mTypeSimple}
+	app.dict[c.Key] = value{
+		Key:       c.Key,
+		String:    c.Value,
+		ValueType: ValueTypeSimple,
+	}
 
 	if c.Expire.Key != "" {
 		now := time.Now()
-		newValue.shouldExpire = true
 		switch c.Expire.Key {
 		case "EX":
-			newValue.expireAt = now.Add(time.Second * time.Duration(c.Expire.EX))
+			expireAt := now.Add(time.Second * time.Duration(c.Expire.EX))
+			app.expiry[c.Key] = expireAt
 		case "PX":
-			newValue.expireAt = now.Add(time.Millisecond * time.Duration(c.Expire.PX))
+			expireAt := now.Add(time.Millisecond * time.Duration(c.Expire.PX))
+			app.expiry[c.Key] = expireAt
 		case "EXAT":
-			newValue.expireAt = time.Unix(int64(c.Expire.EXAT), 0)
+			expireAt := time.Unix(int64(c.Expire.EXAT), 0)
+			app.expiry[c.Key] = expireAt
 		case "PXAT":
-			newValue.expireAt = time.UnixMilli(int64(c.Expire.PXAT))
+			expireAt := time.UnixMilli(int64(c.Expire.PXAT))
+			app.expiry[c.Key] = expireAt
 		case "KEEPTTL":
-			newValue.shouldExpire = oldValue.shouldExpire
-			newValue.expireAt = oldValue.expireAt
+			// DO nothing
 		default:
 			panic("should not get to here")
 		}
 	}
-
-	app.m[c.Key] = newValue
 
 	if c.GET {
 		return types.NewStringRawCmd(c.Value), nil
@@ -189,17 +186,21 @@ func (app *App) handleGET(args []string) (types.RawCmd, error) {
 	if err != nil {
 		return types.RawCmd{}, err
 	}
-	cmd := types.NewNullRawCmd()
-	if value, exists := app.m[c.Key]; exists {
-		if value.shouldExpire && time.Now().After(value.expireAt) {
-			delete(app.m, args[1])
-		} else if value.mType != mTypeSimple {
-			return types.RawCmd{}, NewWrongTypeError(mTypeSimple, value.mType)
-		} else {
-			cmd = types.NewBulkStringRawCmd(value.value)
-		}
+
+	value, exists := app.dict[c.Key]
+	if !exists {
+		return types.NewNullRawCmd(), nil
 	}
-	return cmd, nil
+	if value.ValueType != ValueTypeSimple {
+		return types.RawCmd{}, NewWrongTypeError(ValueTypeSimple, value.ValueType)
+	}
+	if expireTime, expireExists := app.expiry[c.Key]; expireExists && time.Now().After(expireTime) {
+		delete(app.dict, c.Key)
+		delete(app.expiry, c.Key)
+		return types.NewNullRawCmd(), nil
+	}
+
+	return types.NewBulkStringRawCmd(value.String), nil
 }
 
 func (app *App) handleRPUSH(args []string) (types.RawCmd, error) {
@@ -208,16 +209,16 @@ func (app *App) handleRPUSH(args []string) (types.RawCmd, error) {
 		return types.RawCmd{}, err
 	}
 
-	value, exists := app.m[c.Key]
-	if exists && value.mType != mTypeList {
-		return types.RawCmd{}, NewWrongTypeError(mTypeSimple, value.mType)
+	value, exists := app.dict[c.Key]
+	if exists && value.ValueType != ValueTypeList {
+		return types.RawCmd{}, NewWrongTypeError(ValueTypeSimple, value.ValueType)
 	}
-	value.mType = mTypeList
-	value.listValues = append(value.listValues, c.Values...)
+	value.ValueType = ValueTypeList
+	value.List = append(value.List, c.Values...)
 
-	app.m[c.Key] = value
+	app.dict[c.Key] = value
 
-	return types.NewIntegerRawCmd(int64(len(value.listValues))), nil
+	return types.NewIntegerRawCmd(int64(len(value.List))), nil
 }
 
 func (app *App) handleLPUSH(args []string) (types.RawCmd, error) {
@@ -226,18 +227,18 @@ func (app *App) handleLPUSH(args []string) (types.RawCmd, error) {
 		return types.RawCmd{}, err
 	}
 
-	value, exists := app.m[c.Key]
-	if exists && value.mType != mTypeList {
-		return types.RawCmd{}, NewWrongTypeError(mTypeSimple, value.mType)
+	value, exists := app.dict[c.Key]
+	if exists && value.ValueType != ValueTypeList {
+		return types.RawCmd{}, NewWrongTypeError(ValueTypeSimple, value.ValueType)
 	}
-	value.mType = mTypeList
+	value.ValueType = ValueTypeList
 
 	slices.Reverse(c.Values)
-	value.listValues = append(c.Values, value.listValues...)
+	value.List = append(c.Values, value.List...)
 
-	app.m[c.Key] = value
+	app.dict[c.Key] = value
 
-	return types.NewIntegerRawCmd(int64(len(value.listValues))), nil
+	return types.NewIntegerRawCmd(int64(len(value.List))), nil
 }
 
 func (app *App) handleLRANGE(args []string) (types.RawCmd, error) {
@@ -246,8 +247,8 @@ func (app *App) handleLRANGE(args []string) (types.RawCmd, error) {
 		return types.RawCmd{}, err
 	}
 
-	value, exists := app.m[c.Key]
-	length := len(value.listValues)
+	value, exists := app.dict[c.Key]
+	length := len(value.List)
 
 	start := c.Start
 	if start < 0 {
@@ -264,7 +265,7 @@ func (app *App) handleLRANGE(args []string) (types.RawCmd, error) {
 		return types.NewBulkArrayBulkString(nil), nil
 	}
 
-	return types.NewBulkArrayBulkString(value.listValues[start:stop]), nil
+	return types.NewBulkArrayBulkString(value.List[start:stop]), nil
 }
 
 func (app *App) handleLLEN(args []string) (types.RawCmd, error) {
@@ -273,12 +274,12 @@ func (app *App) handleLLEN(args []string) (types.RawCmd, error) {
 		return types.RawCmd{}, err
 	}
 
-	value, exists := app.m[c.Key]
-	if exists && value.mType != mTypeList {
-		return types.RawCmd{}, NewWrongTypeError(mTypeSimple, value.mType)
+	value, exists := app.dict[c.Key]
+	if exists && value.ValueType != ValueTypeList {
+		return types.RawCmd{}, NewWrongTypeError(ValueTypeSimple, value.ValueType)
 	}
 
-	return types.NewIntegerRawCmd(int64(len(value.listValues))), nil
+	return types.NewIntegerRawCmd(int64(len(value.List))), nil
 
 }
 
@@ -288,29 +289,29 @@ func (app *App) handleLPOP(args []string) (types.RawCmd, error) {
 		return types.RawCmd{}, err
 	}
 
-	value, exists := app.m[c.Key]
+	value, exists := app.dict[c.Key]
 	if !exists {
 		return types.NewNullRawCmd(), nil
 	}
-	if exists && value.mType != mTypeList {
-		return types.RawCmd{}, NewWrongTypeError(mTypeSimple, value.mType)
+	if exists && value.ValueType != ValueTypeList {
+		return types.RawCmd{}, NewWrongTypeError(ValueTypeSimple, value.ValueType)
 	}
 
-	length := len(value.listValues)
+	length := len(value.List)
 
 	if c.Count == nil {
 		if length == 0 {
 			return types.NewNullRawCmd(), nil
 		}
 		v := ""
-		v, value.listValues = splitListOne(value.listValues)
-		app.m[c.Key] = value
+		v, value.List = splitListOne(value.List)
+		app.dict[c.Key] = value
 		return types.NewBulkStringRawCmd(v), nil
 	}
 
 	var vs []string
-	vs, value.listValues = splitList(value.listValues, *c.Count)
-	app.m[c.Key] = value
+	vs, value.List = splitList(value.List, *c.Count)
+	app.dict[c.Key] = value
 
 	return types.NewBulkArrayBulkString(vs), nil
 }
@@ -329,10 +330,10 @@ func (app *App) handleBLPOP(ctx context.Context, args []string) (types.RawCmd, e
 	v := ""
 
 	// non blocking
-	value, exists := app.m[c.Key]
-	if exists && len(value.listValues) > 0 {
-		v, value.listValues = splitListOne(value.listValues)
-		app.m[c.Key] = value
+	value, exists := app.dict[c.Key]
+	if exists && len(value.List) > 0 {
+		v, value.List = splitListOne(value.List)
+		app.dict[c.Key] = value
 		return types.NewBulkArrayBulkString([]string{c.Key, v}), nil
 	}
 
@@ -348,8 +349,6 @@ func (app *App) handleBLPOP(ctx context.Context, args []string) (types.RawCmd, e
 	case <-time.After(timeoutDuration):
 		return types.NewNullRawCmd(), nil
 	}
-
-	return types.NewNullRawCmd(), nil
 }
 
 func splitList[T any](l []T, count int) ([]T, []T) {

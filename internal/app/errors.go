@@ -98,7 +98,7 @@ func (WrongTypeError) Error() string {
 	return "WRONGTYPE Operation against a key holding the wrong kind of value"
 }
 
-func NewWrongTypeError(expected, actual mType) WrongTypeError {
+func NewWrongTypeError(expected, actual ValueType) WrongTypeError {
 	_ = expected
 	_ = actual
 
