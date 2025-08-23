@@ -1,13 +1,5 @@
 package cmd
 
-type PING struct {
-	Message string `arg:"pos:1,default:PONG,optional"`
-}
-
-type ECHO struct {
-	Message string `arg:"pos:1"`
-}
-
 type SET struct {
 	Key   string `arg:"pos:1"`
 	Value string `arg:"pos:2"`
