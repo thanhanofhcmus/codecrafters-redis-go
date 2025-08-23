@@ -289,7 +289,7 @@ func (app *App) handleLPOP(args []string) (types.RawCmd, error) {
 		return types.NewBulkStringRawCmd(v), nil
 	}
 
-	vs := []string{}
+	var vs []string
 	vs, value.listValues = splitList(value.listValues, *c.Count)
 	app.m[c.Key] = value
 
@@ -317,18 +317,18 @@ func (app *App) handleBLPOP(ctx context.Context, args []string) (types.RawCmd, e
 		return types.NewBulkArrayBulkString([]string{c.Key, v}), nil
 	}
 
-	_ = ctx
 	// TODO: implement true timeout infinite
-	// timeoutDuration := time.Hour * 100
-	// if c.TimeoutSecond != 0 {
-	// 	timeoutDuration = time.Second * time.Duration(c.TimeoutSecond)
-	// }
-	// select {
-	// case <-ctx.Done():
-	// 	// TODO: handle timeout error
-	// case <-time.After(timeoutDuration):
-	// 	//
-	// }
+	timeoutDuration := time.Hour * 100
+	if c.TimeoutSecond != 0 {
+		timeoutDuration = time.Second * time.Duration(c.TimeoutSecond)
+	}
+	select {
+	case <-ctx.Done():
+		// TODO: handle timeout error
+		return types.RawCmd{}, ctx.Err()
+	case <-time.After(timeoutDuration):
+		return types.NewNullRawCmd(), nil
+	}
 
 	return types.NewNullRawCmd(), nil
 }
