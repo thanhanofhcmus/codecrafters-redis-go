@@ -1,5 +1,10 @@
 package cmd
 
+type APPEND struct {
+	Key   string `arg:"pos:1"`
+	Value string `arg:"pos:2"`
+}
+
 type SET struct {
 	Key   string `arg:"pos:1"`
 	Value string `arg:"pos:2"`

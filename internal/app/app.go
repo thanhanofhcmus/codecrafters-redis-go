@@ -71,14 +71,21 @@ func (app *App) HandleCommand(ctx context.Context, cmd types.RawCmd) (result typ
 
 	command := args[0]
 	switch strings.ToUpper(command) {
+	// connections
 	case "PING":
 		result, err = app.handlePING(args)
 	case "ECHO":
+
+		// strings
 		result, err = app.handleECHO(args)
 	case "SET":
 		result, err = app.handleSET(args)
 	case "GET":
 		result, err = app.handleGET(args)
+	case "APPEND":
+		result, err = app.handleAPPEND(args)
+
+		// list
 	case "RPUSH":
 		result, err = app.handleRPUSH(args)
 	case "LPUSH":
@@ -116,6 +123,18 @@ func (app *App) handleECHO(args []string) (types.RawCmd, error) {
 		return types.RawCmd{}, err
 	}
 	return types.NewStringRawCmd(c.Message), nil
+}
+
+func (app *App) handleAPPEND(args []string) (types.RawCmd, error) {
+	c, err := argsparser.Parse[cmd.APPEND](args)
+	if err != nil {
+		return types.RawCmd{}, err
+	}
+
+	value := app.m[c.Key]
+	value.value += c.Value
+
+	return types.NewIntegerRawCmd(int64(len(value.value))), nil
 }
 
 func (app *App) handleSET(args []string) (types.RawCmd, error) {
