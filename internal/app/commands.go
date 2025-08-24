@@ -321,7 +321,7 @@ func (app *App) handleBLPOP(ctx context.Context, args []string) (types.RawCmd, e
 	// TODO: move to use transaction
 	timeoutDuration := time.Hour * 100
 	if c.TimeoutSecond != 0 {
-		timeoutDuration = time.Second * time.Duration(c.TimeoutSecond)
+		timeoutDuration = time.Millisecond * time.Duration(int64(c.TimeoutSecond*1000))
 	}
 	connId := GetIdFromContext(ctx)
 
