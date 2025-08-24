@@ -186,6 +186,7 @@ func (app *App) handleGenericPUSH(key string, newValues []string, fromLeft bool)
 	}
 	app.dict[key] = value
 	app.NotifyKeySpace(value)
+	app.NotifyAndPopBLPOPConsumer(key)
 
 	return types.NewIntegerRawCmd(int64(len(value.List))), nil
 }
@@ -325,8 +326,7 @@ func (app *App) handleBLPOP(ctx context.Context, args []string) (types.RawCmd, e
 	}
 	connId := GetIdFromContext(ctx)
 
-	keySpaceConsumer := app.SubscribeKeySpace(connId)
-	defer app.UnsubscribeKeySpace(connId)
+	consumer := app.SubscribeBLPOPConsumer(connId, c.Key)
 
 	for {
 		select {
@@ -335,11 +335,8 @@ func (app *App) handleBLPOP(ctx context.Context, args []string) (types.RawCmd, e
 			return types.RawCmd{}, ctx.Err()
 		case <-time.After(timeoutDuration):
 			return types.NewNullRawCmd(), nil
-		case v := <-keySpaceConsumer:
-			if v.Key != c.Key {
-				continue
-			}
-			cmd, err := app.handleGenricPOP(v.Key, true, nil)
+		case <-consumer:
+			cmd, err := app.handleGenricPOP(c.Key, true, nil)
 			if err != nil {
 				return types.RawCmd{}, err
 			}

@@ -20,6 +20,12 @@ type Value struct {
 	List      []string
 }
 
+type BLPOPConsumer struct {
+	id  ulid.ID
+	key string
+	ch  chan struct{}
+}
+
 type App struct {
 	// TODO: make this thread safe
 
@@ -27,6 +33,8 @@ type App struct {
 	expiry map[string]time.Time
 
 	keySpaceConsumer map[ulid.ID]chan Value
+	// TODO: add uild
+	blpopConsumers map[string][]BLPOPConsumer
 
 	idGenerator *ulid.Generator
 }
@@ -37,6 +45,7 @@ func NewApp() *App {
 		expiry: map[string]time.Time{},
 
 		keySpaceConsumer: map[ulid.ID]chan Value{},
+		blpopConsumers:   map[string][]BLPOPConsumer{},
 
 		idGenerator: ulid.NewGenerator(),
 	}
