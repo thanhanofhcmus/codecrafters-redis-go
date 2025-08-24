@@ -37,6 +37,25 @@ func (app *App) SubscribeBLPOPConsumer(id ulid.ID, key string) chan struct{} {
 	return ch
 }
 
+func (app *App) UnsubscribeBLOPConsumer(id ulid.ID, key string) {
+	cs := app.blpopConsumers[key]
+	if len(cs) == 0 {
+		return
+	}
+
+	for idx, c := range cs {
+		if c.id != id {
+			continue
+		}
+		close(c.ch)
+		cs = append(cs[:idx], cs[idx+1:]...)
+		break
+	}
+
+	app.blpopConsumers[key] = cs
+
+}
+
 func (app *App) NotifyAndPopBLPOPConsumer(key string) {
 	cs := app.blpopConsumers[key]
 	if len(cs) == 0 {

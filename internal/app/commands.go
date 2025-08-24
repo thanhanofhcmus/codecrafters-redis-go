@@ -326,6 +326,7 @@ func (app *App) handleBLPOP(ctx context.Context, args []string) (types.RawCmd, e
 	connId := GetIdFromContext(ctx)
 
 	consumer := app.SubscribeBLPOPConsumer(connId, c.Key)
+	defer app.UnsubscribeBLOPConsumer(connId, c.Key)
 
 	for {
 		select {
