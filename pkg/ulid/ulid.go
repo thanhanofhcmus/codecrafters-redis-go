@@ -25,7 +25,7 @@ type Generator struct {
 
 func NewGenerator() *Generator {
 	// remove I, L, O, U
-	const crockford = "0123456789ABCDEFGHJKLMNPQRSTVWXYZ"
+	const crockford = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 	enc := base32.NewEncoding(crockford).WithPadding(base32.NoPadding)
 	return &Generator{
 		enc: enc,

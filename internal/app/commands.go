@@ -85,6 +85,8 @@ func (app *App) handleAPPEND(args []string) (types.RawCmd, error) {
 	value := app.dict[c.Key]
 	value.String += c.Value
 
+	// TODO: notify keyspace, check expiry and check type
+
 	return types.NewIntegerRawCmd(int64(len(value.String))), nil
 }
 
@@ -105,11 +107,13 @@ func (app *App) handleSET(args []string) (types.RawCmd, error) {
 		}
 	}
 
-	app.dict[c.Key] = Value{
+	value := Value{
 		Key:       c.Key,
 		String:    c.Value,
 		ValueType: ValueTypeSimple,
 	}
+	app.dict[c.Key] = value
+	app.NotifyKeySpace(value)
 
 	if c.Expire.Key != "" {
 		now := time.Now()
@@ -161,21 +165,27 @@ func (app *App) handleGET(args []string) (types.RawCmd, error) {
 	return types.NewBulkStringRawCmd(value.String), nil
 }
 
-func (app *App) handleRPUSH(args []string) (types.RawCmd, error) {
-	c, err := argsparser.Parse[cmd.RPUSH](args)
-	if err != nil {
-		return types.RawCmd{}, err
-	}
-
-	value, exists := app.dict[c.Key]
+func (app *App) handleGenericPUSH(key string, newValues []string, fromLeft bool) (types.RawCmd, error) {
+	value, exists := app.dict[key]
 	if exists && value.ValueType != ValueTypeList {
 		return types.RawCmd{}, NewWrongTypeError(ValueTypeSimple, value.ValueType)
 	}
-	value.Key = c.Key
+	if expireTime, expireExists := app.expiry[key]; expireExists && time.Now().After(expireTime) {
+		delete(app.dict, key)
+		delete(app.expiry, key)
+		return types.NewNullRawCmd(), nil
+	}
+	value.Key = key
 	value.ValueType = ValueTypeList
-	value.List = append(value.List, c.Values...)
+	if fromLeft {
+		value.List = append(value.List, newValues...)
 
-	app.dict[c.Key] = value
+	} else {
+		slices.Reverse(newValues)
+		value.List = append(newValues, value.List...)
+	}
+	app.dict[key] = value
+	app.NotifyKeySpace(value)
 
 	return types.NewIntegerRawCmd(int64(len(value.List))), nil
 }
@@ -185,20 +195,15 @@ func (app *App) handleLPUSH(args []string) (types.RawCmd, error) {
 	if err != nil {
 		return types.RawCmd{}, err
 	}
+	return app.handleGenericPUSH(c.Key, c.Values, true)
+}
 
-	value, exists := app.dict[c.Key]
-	if exists && value.ValueType != ValueTypeList {
-		return types.RawCmd{}, NewWrongTypeError(ValueTypeSimple, value.ValueType)
+func (app *App) handleRPUSH(args []string) (types.RawCmd, error) {
+	c, err := argsparser.Parse[cmd.RPUSH](args)
+	if err != nil {
+		return types.RawCmd{}, err
 	}
-	value.Key = c.Key
-	value.ValueType = ValueTypeList
-
-	slices.Reverse(c.Values)
-	value.List = append(c.Values, value.List...)
-
-	app.dict[c.Key] = value
-
-	return types.NewIntegerRawCmd(int64(len(value.List))), nil
+	return app.handleGenericPUSH(c.Key, c.Values, false)
 }
 
 func (app *App) handleLRANGE(args []string) (types.RawCmd, error) {
@@ -314,24 +319,33 @@ func (app *App) handleBLPOP(ctx context.Context, args []string) (types.RawCmd, e
 
 	// TODO: implement true timeout infinite or some kind of max timeout of a transaction
 	// TODO: move to use transaction
-	// timeoutDuration := time.Hour * 100
-	// if c.TimeoutSecond != 0 {
-	// 	timeoutDuration = time.Second * time.Duration(c.TimeoutSecond)
-	// }
-	// var keySpaceConsumer chan Value = app.SubscribeKeySpace()
-	// for {
-	// 	select {
-	// 	case <-ctx.Done():
-	// 		// TODO: handle timeout error
-	// 		return types.RawCmd{}, ctx.Err()
-	// 	case <-time.After(timeoutDuration):
-	// 		return types.NewNullRawCmd(), nil
-	// 	case v := <-keySpaceConsumer:
-	// 		//
-	// 	}
-	// }
+	timeoutDuration := time.Hour * 100
+	if c.TimeoutSecond != 0 {
+		timeoutDuration = time.Second * time.Duration(c.TimeoutSecond)
+	}
+	connId := GetIdFromContext(ctx)
 
-	panic("unimplemented")
+	keySpaceConsumer := app.SubscribeKeySpace(connId)
+	defer app.UnsubscribeKeySpace(connId)
+
+	for {
+		select {
+		case <-ctx.Done():
+			// TODO: handle timeout error
+			return types.RawCmd{}, ctx.Err()
+		case <-time.After(timeoutDuration):
+			return types.NewNullRawCmd(), nil
+		case v := <-keySpaceConsumer:
+			if v.Key != c.Key {
+				continue
+			}
+			cmd, err := app.handleGenricPOP(v.Key, true, nil)
+			if err != nil {
+				return types.RawCmd{}, err
+			}
+			return types.NewBulkArrayBulkString([]string{c.Key, cmd.BulkString}), nil
+		}
+	}
 }
 
 func splitList[T any](l []T, fromLeft bool, count int) ([]T, []T) {

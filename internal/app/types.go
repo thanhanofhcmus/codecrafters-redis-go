@@ -22,8 +22,11 @@ type Value struct {
 
 type App struct {
 	// TODO: make this thread safe
+
 	dict   map[string]Value
 	expiry map[string]time.Time
+
+	keySpaceConsumer map[ulid.ID]chan Value
 
 	idGenerator *ulid.Generator
 }
@@ -32,6 +35,8 @@ func NewApp() *App {
 	return &App{
 		dict:   map[string]Value{},
 		expiry: map[string]time.Time{},
+
+		keySpaceConsumer: map[ulid.ID]chan Value{},
 
 		idGenerator: ulid.NewGenerator(),
 	}
