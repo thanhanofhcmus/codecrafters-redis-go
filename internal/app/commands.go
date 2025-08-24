@@ -12,26 +12,6 @@ import (
 	"github.com/codecrafters-io/redis-starter-go/pkg/types/cmd"
 )
 
-type ValueType int
-
-const (
-	ValueTypeSimple ValueType = iota
-	ValueTypeList
-)
-
-type value struct {
-	Key       string
-	ValueType ValueType
-	String    string
-	List      []string
-}
-
-type App struct {
-	// TODO: make this thread safe
-	dict   map[string]value
-	expiry map[string]time.Time
-}
-
 func convertArgsCmdToString(cmd types.RawCmd) ([]string, error) {
 	if cmd.Sym != types.SymArray {
 		return nil, NewInvalidTypeError(types.SymArray, cmd.Sym)
@@ -48,12 +28,6 @@ func convertArgsCmdToString(cmd types.RawCmd) ([]string, error) {
 		result = append(result, arg.BulkString)
 	}
 	return result, nil
-}
-
-func NewApp() *App {
-	return &App{
-		dict: map[string]value{},
-	}
 }
 
 func (app *App) HandleCommand(ctx context.Context, cmd types.RawCmd) (result types.RawCmd, err error) {
@@ -213,6 +187,7 @@ func (app *App) handleRPUSH(args []string) (types.RawCmd, error) {
 	if exists && value.ValueType != ValueTypeList {
 		return types.RawCmd{}, NewWrongTypeError(ValueTypeSimple, value.ValueType)
 	}
+	value.Key = c.Key
 	value.ValueType = ValueTypeList
 	value.List = append(value.List, c.Values...)
 
@@ -231,6 +206,7 @@ func (app *App) handleLPUSH(args []string) (types.RawCmd, error) {
 	if exists && value.ValueType != ValueTypeList {
 		return types.RawCmd{}, NewWrongTypeError(ValueTypeSimple, value.ValueType)
 	}
+	value.Key = c.Key
 	value.ValueType = ValueTypeList
 
 	slices.Reverse(c.Values)
