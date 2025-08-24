@@ -178,11 +178,10 @@ func (app *App) handleGenericPUSH(key string, newValues []string, fromLeft bool)
 	value.Key = key
 	value.ValueType = ValueTypeList
 	if fromLeft {
-		value.List = append(value.List, newValues...)
-
-	} else {
 		slices.Reverse(newValues)
 		value.List = append(newValues, value.List...)
+	} else {
+		value.List = append(value.List, newValues...)
 	}
 	app.dict[key] = value
 	app.NotifyKeySpace(value)
