@@ -20,6 +20,10 @@ func (app *App) HandleCommand(ctx context.Context, cmd types.RawCmd) (result typ
 
 	command := args[0]
 	switch strings.ToUpper(command) {
+	// generic
+	case "TYPE":
+		result, err = app.handleTYPE(args)
+
 	// connections
 	case "PING":
 		result, err = app.handlePING(args)
@@ -58,6 +62,18 @@ func (app *App) HandleCommand(ctx context.Context, cmd types.RawCmd) (result typ
 	}
 
 	return
+}
+
+func (app *App) handleTYPE(args []string) (types.RawCmd, error) {
+	c, err := argsparser.Parse[cmd.TYPE](args)
+	if err != nil {
+		return types.RawCmd{}, err
+	}
+	value, exists := app.dict[c.Key]
+	if !exists {
+		return types.NewStringRawCmd("none"), nil
+	}
+	return types.NewStringRawCmd(ValueTypeToName(value.ValueType)), nil
 }
 
 func (app *App) handlePING(args []string) (types.RawCmd, error) {
@@ -110,7 +126,7 @@ func (app *App) handleSET(args []string) (types.RawCmd, error) {
 	value := Value{
 		Key:       c.Key,
 		String:    c.Value,
-		ValueType: ValueTypeSimple,
+		ValueType: ValueTypeString,
 	}
 	app.dict[c.Key] = value
 	app.NotifyKeySpace(value)
@@ -153,8 +169,8 @@ func (app *App) handleGET(args []string) (types.RawCmd, error) {
 	if !exists {
 		return types.NewNullRawCmd(), nil
 	}
-	if value.ValueType != ValueTypeSimple {
-		return types.RawCmd{}, NewWrongTypeError(ValueTypeSimple, value.ValueType)
+	if value.ValueType != ValueTypeString {
+		return types.RawCmd{}, NewWrongTypeError(ValueTypeString, value.ValueType)
 	}
 	if expireTime, expireExists := app.expiry[c.Key]; expireExists && time.Now().After(expireTime) {
 		delete(app.dict, c.Key)
@@ -168,7 +184,7 @@ func (app *App) handleGET(args []string) (types.RawCmd, error) {
 func (app *App) handleGenericPUSH(key string, newValues []string, fromLeft bool) (types.RawCmd, error) {
 	value, exists := app.dict[key]
 	if exists && value.ValueType != ValueTypeList {
-		return types.RawCmd{}, NewWrongTypeError(ValueTypeSimple, value.ValueType)
+		return types.RawCmd{}, NewWrongTypeError(ValueTypeString, value.ValueType)
 	}
 	if expireTime, expireExists := app.expiry[key]; expireExists && time.Now().After(expireTime) {
 		delete(app.dict, key)
@@ -241,7 +257,7 @@ func (app *App) handleLLEN(args []string) (types.RawCmd, error) {
 
 	value, exists := app.dict[c.Key]
 	if exists && value.ValueType != ValueTypeList {
-		return types.RawCmd{}, NewWrongTypeError(ValueTypeSimple, value.ValueType)
+		return types.RawCmd{}, NewWrongTypeError(ValueTypeString, value.ValueType)
 	}
 
 	return types.NewIntegerRawCmd(int64(len(value.List))), nil
@@ -253,7 +269,7 @@ func (app *App) handleGenricPOP(key string, fromLeft bool, count *int) (types.Ra
 		return types.NewNullRawCmd(), nil
 	}
 	if exists && value.ValueType != ValueTypeList {
-		return types.RawCmd{}, NewWrongTypeError(ValueTypeSimple, value.ValueType)
+		return types.RawCmd{}, NewWrongTypeError(ValueTypeString, value.ValueType)
 	}
 	if expireTime, expireExists := app.expiry[key]; expireExists && time.Now().After(expireTime) {
 		delete(app.dict, key)
