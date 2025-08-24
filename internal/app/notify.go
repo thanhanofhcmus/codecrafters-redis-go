@@ -39,7 +39,7 @@ func (app *App) SubscribeBLPOPConsumer(id ulid.ID, key string) chan struct{} {
 
 func (app *App) NotifyAndPopBLPOPConsumer(key string) {
 	cs := app.blpopConsumers[key]
-	if len(key) == 0 {
+	if len(cs) == 0 {
 		return
 	}
 	c := cs[0]
