@@ -4,12 +4,12 @@ type LLEN struct {
 	Key string `arg:"pos:1"`
 }
 
-type RPUSH struct {
+type LPUSH struct {
 	Key    string   `arg:"pos:1"`
 	Values []string `arg:"pos:2,variadic"`
 }
 
-type LPUSH struct {
+type RPUSH struct {
 	Key    string   `arg:"pos:1"`
 	Values []string `arg:"pos:2,variadic"`
 }
@@ -21,6 +21,11 @@ type LRANGE struct {
 }
 
 type LPOP struct {
+	Key   string `arg:"pos:1"`
+	Count *int   `arg:"pos:2,optional"`
+}
+
+type RPOP struct {
 	Key   string `arg:"pos:1"`
 	Count *int   `arg:"pos:2,optional"`
 }

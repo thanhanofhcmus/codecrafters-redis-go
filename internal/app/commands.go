@@ -12,24 +12,6 @@ import (
 	"github.com/codecrafters-io/redis-starter-go/pkg/types/cmd"
 )
 
-func convertArgsCmdToString(cmd types.RawCmd) ([]string, error) {
-	if cmd.Sym != types.SymArray {
-		return nil, NewInvalidTypeError(types.SymArray, cmd.Sym)
-	}
-	args := cmd.Array
-	if len(args) == 0 {
-		return nil, NewExpectArgumentError("<command>")
-	}
-	result := make([]string, 0, len(args))
-	for idx, arg := range args {
-		if arg.Sym != types.SymBulkString {
-			return nil, NewArrayElementError(idx, NewInvalidTypeError(types.SymBulkString, arg.Sym))
-		}
-		result = append(result, arg.BulkString)
-	}
-	return result, nil
-}
-
 func (app *App) HandleCommand(ctx context.Context, cmd types.RawCmd) (result types.RawCmd, err error) {
 	args, err := convertArgsCmdToString(cmd)
 	if err != nil {
@@ -53,16 +35,18 @@ func (app *App) HandleCommand(ctx context.Context, cmd types.RawCmd) (result typ
 		result, err = app.handleAPPEND(args)
 
 	// list
-	case "RPUSH":
-		result, err = app.handleRPUSH(args)
 	case "LPUSH":
 		result, err = app.handleLPUSH(args)
+	case "RPUSH":
+		result, err = app.handleRPUSH(args)
 	case "LRANGE":
 		result, err = app.handleLRANGE(args)
 	case "LLEN":
 		result, err = app.handleLLEN(args)
 	case "LPOP":
 		result, err = app.handleLPOP(args)
+	case "RPOP":
+		result, err = app.handleRPOP(args)
 	case "BLPOP":
 		result, err = app.handleBLPOP(ctx, args)
 	default:
@@ -121,7 +105,7 @@ func (app *App) handleSET(args []string) (types.RawCmd, error) {
 		}
 	}
 
-	app.dict[c.Key] = value{
+	app.dict[c.Key] = Value{
 		Key:       c.Key,
 		String:    c.Value,
 		ValueType: ValueTypeSimple,
@@ -256,7 +240,39 @@ func (app *App) handleLLEN(args []string) (types.RawCmd, error) {
 	}
 
 	return types.NewIntegerRawCmd(int64(len(value.List))), nil
+}
 
+func (app *App) handleGenricPOP(key string, fromLeft bool, count *int) (types.RawCmd, error) {
+	value, exists := app.dict[key]
+	if !exists {
+		return types.NewNullRawCmd(), nil
+	}
+	if exists && value.ValueType != ValueTypeList {
+		return types.RawCmd{}, NewWrongTypeError(ValueTypeSimple, value.ValueType)
+	}
+	if expireTime, expireExists := app.expiry[key]; expireExists && time.Now().After(expireTime) {
+		delete(app.dict, key)
+		delete(app.expiry, key)
+		return types.NewNullRawCmd(), nil
+	}
+
+	length := len(value.List)
+
+	if count == nil {
+		if length == 0 {
+			return types.NewNullRawCmd(), nil
+		}
+		v := ""
+		v, value.List = splitListOne(value.List, fromLeft)
+		app.dict[key] = value
+		return types.NewBulkStringRawCmd(v), nil
+	}
+
+	var vs []string
+	vs, value.List = splitList(value.List, fromLeft, *count)
+	app.dict[key] = value
+
+	return types.NewBulkArrayBulkString(vs), nil
 }
 
 func (app *App) handleLPOP(args []string) (types.RawCmd, error) {
@@ -264,32 +280,15 @@ func (app *App) handleLPOP(args []string) (types.RawCmd, error) {
 	if err != nil {
 		return types.RawCmd{}, err
 	}
+	return app.handleGenricPOP(c.Key, true, c.Count)
+}
 
-	value, exists := app.dict[c.Key]
-	if !exists {
-		return types.NewNullRawCmd(), nil
+func (app *App) handleRPOP(args []string) (types.RawCmd, error) {
+	c, err := argsparser.Parse[cmd.RPOP](args)
+	if err != nil {
+		return types.RawCmd{}, err
 	}
-	if exists && value.ValueType != ValueTypeList {
-		return types.RawCmd{}, NewWrongTypeError(ValueTypeSimple, value.ValueType)
-	}
-
-	length := len(value.List)
-
-	if c.Count == nil {
-		if length == 0 {
-			return types.NewNullRawCmd(), nil
-		}
-		v := ""
-		v, value.List = splitListOne(value.List)
-		app.dict[c.Key] = value
-		return types.NewBulkStringRawCmd(v), nil
-	}
-
-	var vs []string
-	vs, value.List = splitList(value.List, *c.Count)
-	app.dict[c.Key] = value
-
-	return types.NewBulkArrayBulkString(vs), nil
+	return app.handleGenricPOP(c.Key, false, c.Count)
 }
 
 func (app *App) handleBLPOP(ctx context.Context, args []string) (types.RawCmd, error) {
@@ -308,32 +307,68 @@ func (app *App) handleBLPOP(ctx context.Context, args []string) (types.RawCmd, e
 	// non blocking
 	value, exists := app.dict[c.Key]
 	if exists && len(value.List) > 0 {
-		v, value.List = splitListOne(value.List)
+		v, value.List = splitListOne(value.List, true)
 		app.dict[c.Key] = value
 		return types.NewBulkArrayBulkString([]string{c.Key, v}), nil
 	}
 
-	// TODO: implement true timeout infinite
-	timeoutDuration := time.Hour * 100
-	if c.TimeoutSecond != 0 {
-		timeoutDuration = time.Second * time.Duration(c.TimeoutSecond)
+	// TODO: implement true timeout infinite or some kind of max timeout of a transaction
+	// TODO: move to use transaction
+	// timeoutDuration := time.Hour * 100
+	// if c.TimeoutSecond != 0 {
+	// 	timeoutDuration = time.Second * time.Duration(c.TimeoutSecond)
+	// }
+	// var keySpaceConsumer chan Value = app.SubscribeKeySpace()
+	// for {
+	// 	select {
+	// 	case <-ctx.Done():
+	// 		// TODO: handle timeout error
+	// 		return types.RawCmd{}, ctx.Err()
+	// 	case <-time.After(timeoutDuration):
+	// 		return types.NewNullRawCmd(), nil
+	// 	case v := <-keySpaceConsumer:
+	// 		//
+	// 	}
+	// }
+
+	panic("unimplemented")
+}
+
+func splitList[T any](l []T, fromLeft bool, count int) ([]T, []T) {
+	n := len(l)
+	if n == 0 {
+		return nil, nil
 	}
-	select {
-	case <-ctx.Done():
-		// TODO: handle timeout error
-		return types.RawCmd{}, ctx.Err()
-	case <-time.After(timeoutDuration):
-		return types.NewNullRawCmd(), nil
+	if fromLeft {
+		count = max(count, 0)
+		count = min(count, n)
+		return l[:count], l[count:]
+	} else {
+		count = max(count, 0)
+		count = min(count, n)
+		return l[:n-count], l[n-count:]
 	}
 }
 
-func splitList[T any](l []T, count int) ([]T, []T) {
-	count = max(count, 0)
-	count = min(count, len(l)-1)
-	return l[:count], l[count:]
-}
-
-func splitListOne[T any](l []T) (T, []T) {
-	a, b := splitList(l, 1)
+func splitListOne[T any](l []T, fromLeft bool) (T, []T) {
+	a, b := splitList(l, fromLeft, 1)
 	return a[0], b
+}
+
+func convertArgsCmdToString(cmd types.RawCmd) ([]string, error) {
+	if cmd.Sym != types.SymArray {
+		return nil, NewInvalidTypeError(types.SymArray, cmd.Sym)
+	}
+	args := cmd.Array
+	if len(args) == 0 {
+		return nil, NewExpectArgumentError("<command>")
+	}
+	result := make([]string, 0, len(args))
+	for idx, arg := range args {
+		if arg.Sym != types.SymBulkString {
+			return nil, NewArrayElementError(idx, NewInvalidTypeError(types.SymBulkString, arg.Sym))
+		}
+		result = append(result, arg.BulkString)
+	}
+	return result, nil
 }

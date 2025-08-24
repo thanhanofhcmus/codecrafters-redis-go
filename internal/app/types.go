@@ -13,7 +13,7 @@ const (
 	ValueTypeList
 )
 
-type value struct {
+type Value struct {
 	Key       string
 	ValueType ValueType
 	String    string
@@ -22,7 +22,7 @@ type value struct {
 
 type App struct {
 	// TODO: make this thread safe
-	dict   map[string]value
+	dict   map[string]Value
 	expiry map[string]time.Time
 
 	idGenerator *ulid.Generator
@@ -30,7 +30,7 @@ type App struct {
 
 func NewApp() *App {
 	return &App{
-		dict:   map[string]value{},
+		dict:   map[string]Value{},
 		expiry: map[string]time.Time{},
 
 		idGenerator: ulid.NewGenerator(),
